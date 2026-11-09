@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Imbiss Imperium</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<style>
+  :root { --ink: #1d1b2e; --cream: #fff6e5; --mustard: #ffc23d; --ketchup: #e8473b; color-scheme: light; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3f0; color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: none; -webkit-tap-highlight-color: transparent; }
+  canvas { display: block; }
+  #hud { position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px)); display: flex; gap: 8px; pointer-events: none; }
+  .chip { background: var(--cream); border-radius: 999px; padding: 8px 16px; font-weight: 800; font-size: 20px;
+    box-shadow: 0 4px 0 rgba(0,0,0,.18); font-variant-numeric: tabular-nums; }
+  .chip.bump { animation: bump .25s ease; }
+  @keyframes bump { 50% { transform: scale(1.15); } }
+  #tip { position: fixed; left: 0; right: 0; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); display: flex; justify-content: center;
+    padding: 0 max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); pointer-events: none; }
+  #tip span { background: rgba(29,27,46,.82); color: #fff; padding: 10px 18px; border-radius: 18px; font-weight: 600; font-size: 15px; text-align: center; max-width: 34ch; }
+  #joy { position: fixed; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.22);
+    border: 3px solid rgba(255,255,255,.65); display: none; pointer-events: none; transform: translate(-50%, -50%); }
+  #knob { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px; border-radius: 50%; background: #fff; box-shadow: 0 3px 8px rgba(0,0,0,.3); }
+</style>
+</head>
+<body>
+<div id="hud"><div class="chip" id="moneychip">💶 <span id="money">0</span> €</div></div>
+<div id="tip"><span id="tiptext"></span></div>
+<div id="joy"><div id="knob"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+// =====================================================================
+// Imbiss Imperium – Schritt 1 (Prototyp)
+// Laufen, Kunden bedienen, Geld verdienen, Imbiss ausbauen.
+// =====================================================================
+
+const isTouch = matchMedia('(pointer: coarse)').matches;
+
+// ---------- Speichern (funktioniert auch, wenn der Browser es blockiert) ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('imbiss.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('imbiss.' + k, JSON.stringify(v)); } catch (e) {} },
+};
+
+// ---------- Grundgerüst ----------
+const SKY = 0x9fd3f0;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(SKY);
+scene.fog = new THREE.Fog(SKY, 35, 80);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 200);
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  // Im Hochformat etwas weiter weg, damit man genug sieht
+  camera.userData.dist = camera.aspect < 0.8 ? 1.9 : 1.1;
+  camera.updateProjectionMatrix();
+}
+resize();
+addEventListener('resize', resize);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a60, 0.8));
+const sun = new THREE.DirectionalLight(0xfff4e0, 0.7);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, near: 1, far: 60 });
+scene.add(sun, sun.target);
+
+// ---------- Bausteine ----------
+const matCache = {};
+function mat(c) { return matCache[c] || (matCache[c] = new THREE.MeshLambertMaterial({ color: c })); }
+function box(w, h, d, c, x, y, z, parent = scene) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(c));
+  m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m;
+}
+function cyl(rt, rb, h, c, x, y, z, parent = scene, seg = 14) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat(c));
+  m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m;
+}
+function ball(r, c, x, y, z, parent = scene) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), mat(c));
+  m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m;
+}
+
+// Text-Schilder als Sprites (immer zur Kamera gedreht)
+function makeLabel(lines, opt = {}) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const tex = new THREE.CanvasTexture(cv);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+  sp.scale.set(opt.w || 2.6, (opt.w || 2.6) / 2, 1);
+  sp.userData = { cv, tex, opt };
+  setLabel(sp, lines);
+  return sp;
+}
+function setLabel(sp, lines) {
+  const { cv, tex, opt } = sp.userData; const c = cv.getContext('2d');
+  c.clearRect(0, 0, 256, 128);
+  if (opt.bg !== false) {
+    c.fillStyle = opt.bg || 'rgba(29,27,46,.85)';
+    c.beginPath(); c.roundRect ? c.roundRect(8, 14, 240, 100, 26) : c.rect(8, 14, 240, 100); c.fill();
+  }
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  lines.forEach((l, i) => {
+    let fs = i === 0 ? (opt.size || 38) : 30;
+    do { c.font = (i === 0 ? '800 ' : '700 ') + fs + 'px system-ui, sans-serif'; fs -= 2; } while (c.measureText(l).width > 220 && fs > 12);
+    c.fillStyle = i === 0 ? (opt.color || '#fff') : '#ffc23d';
+    if (opt.stroke) { c.lineWidth = 8; c.strokeStyle = opt.stroke; c.strokeText(l, 128, 64 + (i - (lines.length - 1) / 2) * 40); }
+    c.fillText(l, 128, 64 + (i - (lines.length - 1) / 2) * 40);
+  });
+  tex.needsUpdate = true;
+}
+
+// ---------- Figuren ----------
+function makePerson(shirt, pants = 0x34405e, skin = 0xf1c7a0, hair = 0x3b2a20) {
+  const g = new THREE.Group();
+  const hipL = new THREE.Group(); hipL.position.set(-0.15, 0.75, 0); g.add(hipL);
+  const hipR = new THREE.Group(); hipR.position.set(0.15, 0.75, 0); g.add(hipR);
+  box(0.22, 0.72, 0.24, pants, 0, -0.36, 0, hipL);
+  box(0.22, 0.72, 0.24, pants, 0, -0.36, 0, hipR);
+  box(0.62, 0.72, 0.36, shirt, 0, 1.12, 0, g);
+  const shL = new THREE.Group(); shL.position.set(-0.41, 1.42, 0); g.add(shL);
+  const shR = new THREE.Group(); shR.position.set(0.41, 1.42, 0); g.add(shR);
+  box(0.17, 0.62, 0.18, shirt, 0, -0.3, 0, shL);
+  box(0.17, 0.62, 0.18, shirt, 0, -0.3, 0, shR);
+  ball(0.27, skin, 0, 1.78, 0, g);
+  box(0.5, 0.14, 0.5, hair, 0, 2.0, -0.02, g);
+  return { g, hipL, hipR, shL, shR, phase: 0 };
+}
+function animateWalk(p, moving, dt) {
+  if (moving) p.phase += dt * 11; else p.phase *= 0.85;
+  const s = Math.sin(p.phase) * (moving ? 0.65 : 0);
+  p.hipL.rotation.x = s; p.hipR.rotation.x = -s;
+  p.shL.rotation.x = -s * 0.8; p.shR.rotation.x = s * 0.8;
+}
+
+// ---------- Stadt ----------
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(160, 160), mat(0x8fcf6b));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+
+box(32, 0.1, 15, 0xded6c6, 0, 0.05, -1.5);              // Platz
+for (let x = -15; x <= 15; x += 2) for (let z = -8.5; z <= 5.5; z += 2)
+  if ((x + z) % 4 === 0) box(1.9, 0.02, 1.9, 0xd2c9b7, x, 0.11, z);
+box(160, 0.08, 8, 0x4a4a55, 0, 0.04, 10);               // Straße
+for (let x = -70; x < 70; x += 6) box(3, 0.02, 0.25, 0xffffff, x, 0.09, 10);
+box(160, 0.14, 3, 0xcfc7b8, 0, 0.07, 15.5);             // Gehweg gegenüber
+box(160, 0.14, 1.2, 0xcfc7b8, 0, 0.07, 5.6);            // Bordstein
+
+const HOUSE_COLORS = [0xf2a65a, 0xe9e2d0, 0x9ec5e8, 0xef8a7a, 0xf6d06f, 0xb8d8a8, 0xd9b8e6];
+function house(x, z, w, h, d, face) {
+  const c = HOUSE_COLORS[Math.floor(Math.random() * HOUSE_COLORS.length)];
+  box(w, h, d, c, x, h / 2, z);
+  box(w + 0.3, 0.4, d + 0.3, 0x6b5b53, x, h + 0.2, z);
+  for (let fy = 2; fy < h - 1; fy += 2.2)
+    for (let fx = -w / 2 + 1.2; fx < w / 2 - 0.8; fx += 1.8)
+      box(0.9, 1.2, 0.1, 0x3d5a80, x + fx, fy, z + face * (d / 2 + 0.03));
+  box(1.2, 2, 0.1, 0x5a3d2b, x, 1, z + face * (d / 2 + 0.05));
+}
+for (let x = -32; x <= 32; x += 8) if (Math.abs(x) > 3 || true) house(x, -14, 7, 6 + Math.random() * 8, 6, 1);
+for (let x = -36; x <= 36; x += 8) house(x, 22, 7, 6 + Math.random() * 8, 6, -1);
+
+function tree(x, z) {
+  cyl(0.18, 0.25, 1.6, 0x7a5236, x, 0.8, z);
+  ball(1.1, 0x4f9d5a, x, 2.3, z); ball(0.8, 0x5fb36a, x + 0.4, 2.9, z - 0.2);
+}
+[[-14, -9], [14, -9], [-14, 4], [14, 4], [-20, 3], [20, 3], [-26, -6], [26, -6]].forEach(p => tree(p[0], p[1]));
+function lamp(x, z) {
+  cyl(0.08, 0.1, 4, 0x2d2d38, x, 2, z);
+  box(0.7, 0.18, 0.35, 0x2d2d38, x, 4, z);
+  box(0.5, 0.06, 0.25, 0xfff2b0, x, 3.9, z);
+}
+[-10, 10, -24, 24].forEach(x => lamp(x, 5));
+
+// ---------- Der Imbiss ----------
+const kiosk = new THREE.Group(); kiosk.position.set(0, 0, -4.5); scene.add(kiosk);
+box(5, 3, 3, 0xf4efe6, 0, 1.5, 0, kiosk);
+box(4.2, 1.3, 0.1, 0x2e2a3a, 0, 2.0, 1.52, kiosk);       // Fenster/Öffnung
+box(5.2, 1.1, 0.6, 0xc0392b, 0, 0.55, 1.75, kiosk);      // Theke
+box(5.3, 0.1, 0.8, 0xe8dccb, 0, 1.12, 1.75, kiosk);
+for (let i = 0; i < 7; i++) {                            // Markise
+  const s = box(5.4 / 7, 0.08, 1.4, i % 2 ? 0xffffff : 0xe8473b, -2.7 + 5.4 / 14 + i * 5.4 / 7, 3.05, 2.1, kiosk);
+  s.rotation.x = 0.35;
+}
+const kioskSign = makeLabel(['IMBISS'], { bg: '#ffc23d', color: '#1d1b2e', size: 54, w: 3.6 });
+kioskSign.position.set(0, 3.9, 1.2); kiosk.add(kioskSign);
+// Kasse
+box(0.8, 1.0, 0.8, 0x6b5b53, 3.6, 0.5, -2.6);
+box(0.6, 0.35, 0.45, 0x2e2a3a, 3.6, 1.18, -2.6);
+const KIOSK_BOX = { minX: -2.7, maxX: 2.7, minZ: -6.1, maxZ: -2.3 };
+
+// ---------- Felder auf dem Boden ----------
+function makePad(x, z, color, r = 1.1) {
+  const g = new THREE.Group(); g.position.set(x, 0.12, z);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(r * 0.78, r, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 }));
+  ring.rotation.x = -Math.PI / 2; g.add(ring);
+  const fill = new THREE.Mesh(new THREE.CircleGeometry(r * 0.78, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28 }));
+  fill.rotation.x = -Math.PI / 2; g.add(fill);
+  scene.add(g);
+  return { g, ring, fill, x, z, r };
+}
+const cashPad = makePad(3.6, -1.3, 0x3fbf7f, 0.95);
+const cashLabel = makeLabel(['KASSE'], { w: 1.9 });
+cashLabel.position.set(3.6, 2.6, -2.6); scene.add(cashLabel);
+
+// ---------- Spieler ----------
+const player = makePerson(0xe8473b, 0x2d3047);
+box(0.66, 0.12, 0.4, 0xffffff, 0, 1.5, 0.0, player.g);   // Kragen
+player.g.position.set(5, 0, 1);
+scene.add(player.g);
+
+// ---------- Spielzustand ----------
+const state = {
+  money: store.get('money', 0),
+  built: store.get('built', 0),
+  served: store.get('served', 0),
+  price: 5, tip: 0, spawnEvery: 4.2, staff: false,
+};
+const moneyEl = document.getElementById('money');
+const chipEl = document.getElementById('moneychip');
+function showMoney(bump) {
+  moneyEl.textContent = Math.floor(state.money);
+  if (bump) { chipEl.classList.remove('bump'); void chipEl.offsetWidth; chipEl.classList.add('bump'); }
+}
+showMoney();
+let saveTimer = 0;
+function save() { store.set('money', state.money); store.set('built', state.built); store.set('served', state.served); }
+
+// ---------- Ausbau-Stufen ----------
+let staffPerson = null;
+const BUILDS = [
+  { name: 'Tische', cost: 25, pad: [-7, 0], info: '+2 € Trinkgeld', apply() {
+      state.tip += 2;
+      [[-9, -1], [-11.5, 1.5], [-11.5, -3.5]].forEach(([x, z]) => {
+        const t = new THREE.Group(); t.position.set(x, 0, z); scene.add(t);
+        cyl(0.9, 0.9, 0.1, 0xffffff, 0, 1.0, 0, t); cyl(0.08, 0.08, 1, 0x555566, 0, 0.5, 0, t);
+        [[1.2, 0], [-1.2, 0]].forEach(([cx, cz]) => { box(0.6, 0.08, 0.6, 0xe8473b, cx, 0.6, cz, t); box(0.08, 0.6, 0.08, 0x555566, cx, 0.3, cz, t); });
+        cyl(0.05, 0.05, 2.2, 0xdddddd, 0, 1.1, 0, t);
+        const u = new THREE.Mesh(new THREE.ConeGeometry(1.5, 0.6, 8), mat(0xffc23d)); u.position.y = 2.4; u.castShadow = true; t.add(u);
+        popIn(t);
+      });
+  } },
+  { name: 'Kühlschrank', cost: 60, pad: [-4.2, -1.6], info: 'Getränke: +3 € pro Kunde', apply() {
+      state.price += 3;
+      const f = new THREE.Group(); f.position.set(-3.6, 0, -4.2); scene.add(f);
+      box(1.1, 2.2, 0.9, 0x2f80ed, 0, 1.1, 0, f); box(0.9, 1.6, 0.05, 0xbfe3ff, 0, 1.2, 0.47, f);
+      for (let i = 0; i < 3; i++) box(0.8, 0.04, 0.05, 0x1b4f9c, 0, 0.7 + i * 0.5, 0.5, f);
+      popIn(f);
+  } },
+  { name: 'Leuchtschild', cost: 120, pad: [7.5, -5], info: 'Mehr Kunden', apply() {
+      state.spawnEvery *= 0.7;
+      const s = new THREE.Group(); s.position.set(7.5, 0, -6.5); scene.add(s);
+      cyl(0.12, 0.15, 4.5, 0x2d2d38, 0, 2.25, 0, s);
+      const sign = makeLabel(['IMBISS', 'Seit heute!'], { bg: '#e8473b', w: 3.6 }); sign.position.set(0, 5.2, 0); s.add(sign);
+      popIn(s);
+  } },
+  { name: 'Mitarbeiter', cost: 250, pad: [7, 0.5], info: 'Bedient automatisch', apply() {
+      state.staff = true;
+      staffPerson = makePerson(0x3fbf7f, 0x2d3047, 0xc68b59, 0x1a1a1a);
+      staffPerson.g.position.set(1.4, 0, -5.0); scene.add(staffPerson.g);
+      popIn(staffPerson.g);
+  } },
+  { name: 'Grill', cost: 450, pad: [-7.5, -6], info: 'Grillwurst: +5 €', apply() {
+      state.price += 5;
+      const gr = new THREE.Group(); gr.position.set(-6.5, 0, -7.5); scene.add(gr);
+      box(2.2, 1, 1.1, 0x2d2d38, 0, 0.5, 0, gr); box(2.0, 0.08, 0.9, 0xff7a2f, 0, 1.04, 0, gr);
+      for (let i = 0; i < 5; i++) { const w = cyl(0.08, 0.08, 0.7, 0xb5562b, -0.8 + i * 0.4, 1.12, 0, gr, 8); w.rotation.x = Math.PI / 2; }
+      popIn(gr);
+  } },
+  { name: 'Foodtruck', cost: 800, pad: [11, 2], info: '+8 € und mehr Kunden', apply() {
+      state.price += 8; state.spawnEvery *= 0.75;
+      const tr = new THREE.Group(); tr.position.set(12, 0, -2); tr.rotation.y = -0.4; scene.add(tr);
+      box(4.6, 2.4, 2.2, 0xffc23d, 0, 1.6, 0, tr); box(1.4, 1.6, 2.2, 0xffc23d, 2.9, 1.2, 0, tr);
+      box(0.9, 0.8, 2.25, 0x3d5a80, 3.1, 1.6, 0, tr); box(2.6, 1, 0.1, 0x2e2a3a, -0.4, 2.0, 1.12, tr);
+      [[-1.5, 1.1], [1.5, 1.1], [-1.5, -1.1], [1.5, -1.1], [2.9, 1.1], [2.9, -1.1]].forEach(([x, z]) => {
+        const wh = cyl(0.42, 0.42, 0.3, 0x222222, x, 0.42, z, tr, 12); wh.rotation.x = Math.PI / 2; });
+      popIn(tr);
+  } },
+];
+
+const popping = [];
+function popIn(obj) { obj.scale.setScalar(0.01); popping.push({ obj, t: 0 }); }
+
+let buildPad = null, buildLabel = null, buildPaid = 0;
+function setupNextBuild() {
+  if (buildPad) { scene.remove(buildPad.g); scene.remove(buildLabel); }
+  buildPad = null;
+  const b = BUILDS[state.built];
+  if (!b) return;
+  buildPaid = 0;
+  buildPad = makePad(b.pad[0], b.pad[1], 0x4aa3ff, 1.1);
+  buildLabel = makeLabel([b.name, b.cost + ' €'], { w: 2.6 });
+  buildLabel.position.set(b.pad[0], 2.2, b.pad[1]); scene.add(buildLabel);
+}
+// Gespeicherten Fortschritt wiederherstellen
+for (let i = 0; i < state.built; i++) { BUILDS[i].apply(); }
+popping.forEach(p => p.obj.scale.setScalar(1)); popping.length = 0;
+setupNextBuild();
+
+// ---------- Kunden ----------
+const SHIRTS = [0x3d5a80, 0x98c1d9, 0xee6c4d, 0x6a994e, 0xf2cc8f, 0x9b5de5, 0xf15bb5, 0x00bbf9, 0x4f772d];
+const SKINS = [0xf1c7a0, 0xd9a27a, 0xb07a52, 0x8d5a3b, 0x5c3a24];
+const HAIRS = [0x3b2a20, 0x1a1a1a, 0xc79a52, 0x7a3b1e, 0xdddddd];
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const customers = [];
+const QUEUE = i => new THREE.Vector3(0, 0, -1.6 + i * 1.35);
+const MAX_QUEUE = 6;
+let spawnTimer = 0.3;
+
+function spawnCustomer() {
+  const p = makePerson(pick(SHIRTS), pick([0x34405e, 0x2d3047, 0x5a4a3a, 0x3a5a40]), pick(SKINS), pick(HAIRS));
+  const fromLeft = Math.random() < 0.5;
+  p.g.position.set(fromLeft ? -20 : 20, 0, 4.6);
+  scene.add(p.g);
+  const bubble = makeLabel(['🌭'], { bg: 'rgba(255,255,255,.95)', size: 64, w: 1.3 });
+  bubble.position.y = 2.7; bubble.visible = false; p.g.add(bubble);
+  customers.push({ p, bubble, state: 'walk', slot: customers.filter(c => c.state !== 'leave').length, exitX: fromLeft ? 22 : -22, progress: 0 });
+}
+
+function updateCustomers(dt) {
+  spawnTimer -= dt;
+  const inQueue = customers.filter(c => c.state !== 'leave');
+  if (spawnTimer <= 0 && inQueue.length < MAX_QUEUE) { spawnCustomer(); spawnTimer = state.spawnEvery * (0.7 + Math.random() * 0.6); }
+
+  // Plätze in der Schlange neu vergeben
+  inQueue.forEach((c, i) => c.slot = i);
+
+  const onCash = dist2(player.g.position, cashPad) < cashPad.r * cashPad.r;
+  const serving = onCash || state.staff;
+  const serveTime = onCash ? 0.9 : 2.2;
+
+  for (let i = customers.length - 1; i >= 0; i--) {
+    const c = customers[i], pos = c.p.g.position;
+    let target;
+    if (c.state === 'leave') target = new THREE.Vector3(c.exitX, 0, 4.6);
+    else {
+      const q = QUEUE(c.slot);
+      // Erst zum Gehweg, dann in die Schlange
+      target = Math.abs(pos.x) > 1.2 && pos.z > 3.5 ? new THREE.Vector3(0, 0, 4.6) : q;
+      if (Math.abs(pos.x) <= 1.2 || pos.z <= 3.5) target = q;
+    }
+    const d = target.clone().sub(pos); d.y = 0;
+    const len = d.length();
+    const moving = len > 0.05;
+    if (moving) {
+      const step = Math.min(len, 3.4 * dt);
+      pos.add(d.multiplyScalar(step / len));
+      c.p.g.rotation.y = lerpAngle(c.p.g.rotation.y, Math.atan2(d.x, d.z), 1 - Math.exp(-dt * 12));
+    } else if (c.state !== 'leave') {
+      c.p.g.rotation.y = lerpAngle(c.p.g.rotation.y, Math.PI, 1 - Math.exp(-dt * 8)); // zur Theke schauen
+    }
+    animateWalk(c.p, moving, dt);
+
+    if (c.state === 'walk' && !moving) c.state = 'wait';
+    c.bubble.visible = c.state === 'wait';
+
+    if (c.state === 'wait' && c.slot === 0) {
+      if (serving) {
+        c.progress += dt / serveTime;
+        drawProgress(c);
+        if (c.progress >= 1) {
+          const earned = state.price + state.tip;
+          state.money += earned; state.served++;
+          showMoney(true);
+          floatText('+' + earned + ' €', pos.x, 2.8, pos.z);
+          c.state = 'leave'; c.bubble.visible = false;
+          onFirstSale();
+        }
+      }
+    }
+    if (c.state === 'leave' && !moving) { scene.remove(c.p.g); customers.splice(i, 1); }
+  }
+}
+
+function drawProgress(c) {
+  const { cv, tex } = c.bubble.userData, g = cv.getContext('2d');
+  setLabel(c.bubble, ['🌭']);
+  g.lineWidth = 10; g.strokeStyle = '#3fbf7f'; g.lineCap = 'round';
+  g.beginPath(); g.arc(128, 64, 46, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * c.progress); g.stroke();
+  tex.needsUpdate = true;
+}
+
+// ---------- Schwebende Texte ----------
+const floats = [];
+function floatText(text, x, y, z) {
+  const s = makeLabel([text], { bg: false, color: '#ffc23d', stroke: '#1d1b2e', size: 52, w: 2.4 });
+  s.position.set(x, y, z); scene.add(s); floats.push({ s, t: 0 });
+}
+function updateFloats(dt) {
+  for (let i = floats.length - 1; i >= 0; i--) {
+    const f = floats[i]; f.t += dt;
+    f.s.position.y += dt * 1.6; f.s.material.opacity = Math.max(0, 1 - f.t / 1.1);
+    if (f.t > 1.1) { scene.remove(f.s); f.s.material.map.dispose(); f.s.material.dispose(); floats.splice(i, 1); }
+  }
+}
+
+// ---------- Eingabe: Joystick (Handy) und Tastatur (PC) ----------
+const input = { x: 0, z: 0 };
+const joy = document.getElementById('joy'), knob = document.getElementById('knob');
+let joyId = null, joyOrigin = null;
+addEventListener('pointerdown', e => {
+  if (joyId !== null) return;
+  joyId = e.pointerId; joyOrigin = { x: e.clientX, y: e.clientY };
+  joy.style.left = e.clientX + 'px'; joy.style.top = e.clientY + 'px'; joy.style.display = 'block';
+  knob.style.transform = 'translate(0,0)';
+});
+addEventListener('pointermove', e => {
+  if (e.pointerId !== joyId) return;
+  let dx = e.clientX - joyOrigin.x, dy = e.clientY - joyOrigin.y;
+  const len = Math.hypot(dx, dy), max = 50;
+  if (len > max) { dx *= max / len; dy *= max / len; }
+  knob.style.transform = `translate(${dx}px,${dy}px)`;
+  input.x = dx / max; input.z = dy / max;
+});
+function joyEnd(e) { if (e.pointerId !== joyId) return; joyId = null; input.x = input.z = 0; joy.style.display = 'none'; }
+addEventListener('pointerup', joyEnd); addEventListener('pointercancel', joyEnd);
+
+const keys = {};
+addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key.startsWith('Arrow') || e.key === ' ') e.preventDefault(); });
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+// ---------- Hinweise ----------
+const tipEl = document.getElementById('tiptext');
+function setTip(t) { tipEl.textContent = t; tipEl.parentElement.style.display = t ? 'flex' : 'none'; }
+setTip(state.served > 0 ? '' : (isTouch ? 'Finger auf den Bildschirm und ziehen zum Laufen. Stell dich auf das grüne Feld an der Kasse!' : 'Laufen mit WASD oder Pfeiltasten. Stell dich auf das grüne Feld an der Kasse!'));
+function onFirstSale() {
+  if (state.served === 1) setTip('Super! Mit dem Geld baust du aus: Stell dich auf das blaue Feld.');
+}
+
+// ---------- Hilfsfunktionen ----------
+function dist2(a, pad) { const dx = a.x - pad.x, dz = a.z - pad.z; return dx * dx + dz * dz; }
+function lerpAngle(a, b, t) { let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI; if (d < -Math.PI) d += Math.PI * 2; return a + d * t; }
+
+// ---------- Spieler bewegen ----------
+const SPEED = 6.5;
+function updatePlayer(dt) {
+  let ix = input.x, iz = input.z;
+  if (keys['a'] || keys['arrowleft']) ix -= 1;
+  if (keys['d'] || keys['arrowright']) ix += 1;
+  if (keys['w'] || keys['arrowup']) iz -= 1;
+  if (keys['s'] || keys['arrowdown']) iz += 1;
+  const len = Math.hypot(ix, iz);
+  if (len > 1) { ix /= len; iz /= len; }
+  const moving = len > 0.08;
+  const pos = player.g.position;
+  if (moving) {
+    pos.x += ix * SPEED * dt; pos.z += iz * SPEED * dt;
+    player.g.rotation.y = lerpAngle(player.g.rotation.y, Math.atan2(ix, iz), 1 - Math.exp(-dt * 14));
+  }
+  pos.x = Math.max(-28, Math.min(28, pos.x));
+  pos.z = Math.max(-10, Math.min(13.5, pos.z));
+  // Nicht durch den Imbiss laufen
+  const k = KIOSK_BOX, r = 0.35;
+  if (pos.x > k.minX - r && pos.x < k.maxX + r && pos.z > k.minZ - r && pos.z < k.maxZ + r) {
+    const push = [pos.x - (k.minX - r), (k.maxX + r) - pos.x, pos.z - (k.minZ - r), (k.maxZ + r) - pos.z];
+    const m = Math.min(...push), i = push.indexOf(m);
+    if (i === 0) pos.x = k.minX - r; else if (i === 1) pos.x = k.maxX + r; else if (i === 2) pos.z = k.minZ - r; else pos.z = k.maxZ + r;
+  }
+  animateWalk(player, moving, dt);
+}
+
+// ---------- Ausbauen ----------
+function updateBuild(dt) {
+  if (!buildPad) return;
+  const b = BUILDS[state.built];
+  const on = dist2(player.g.position, buildPad) < buildPad.r * buildPad.r;
+  buildPad.fill.material.opacity = on ? 0.55 : 0.28;
+  if (on && state.money >= 1) {
+    const rate = Math.max(b.cost / 1.4, 25);
+    const pay = Math.min(state.money, rate * dt, b.cost - buildPaid);
+    state.money -= pay; buildPaid += pay; showMoney();
+    setLabel(buildLabel, [b.name, Math.ceil(b.cost - buildPaid) + ' €']);
+    if (buildPaid >= b.cost - 0.001) {
+      b.apply();
+      floatText(b.info, b.pad[0], 2.6, b.pad[1]);
+      state.built++;
+      save();
+      if (state.built === 1) setTip('');
+      setupNextBuild();
+      if (!BUILDS[state.built]) setTip('Alles gebaut! Im nächsten Schritt kommen neue Läden und Stadtteile.');
+    }
+  }
+}
+
+// ---------- Kamera ----------
+const camOffset = new THREE.Vector3(0, 11, 10.5);
+function updateCamera(dt, snap) {
+  const p = player.g.position;
+  const want = p.clone().add(camOffset.clone().multiplyScalar(camera.userData.dist));
+  if (snap) camera.position.copy(want); else camera.position.lerp(want, 1 - Math.exp(-dt * 6));
+  camera.lookAt(p.x, p.y + 1, p.z);
+  sun.position.set(p.x + 10, 22, p.z + 8); sun.target.position.copy(p);
+}
+
+// ---------- Hauptschleife ----------
+let last = performance.now(), time = 0;
+updateCamera(0, true);
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 1 / 20); last = now; time += dt;
+  updatePlayer(dt);
+  updateCustomers(dt);
+  updateBuild(dt);
+  updateFloats(dt);
+  if (staffPerson) { staffPerson.g.rotation.y = Math.PI * 0 + Math.sin(time * 2) * 0.2; }
+  for (let i = popping.length - 1; i >= 0; i--) {
+    const p = popping[i]; p.t += dt * 3;
+    const s = p.t >= 1 ? 1 : 1 + Math.sin(p.t * Math.PI) * 0.25 * (1 - p.t) + (p.t - 1) * (1 - p.t) * 0 ;
+    p.obj.scale.setScalar(Math.min(1, p.t) * s);
+    if (p.t >= 1) { p.obj.scale.setScalar(1); popping.splice(i, 1); }
+  }
+  const pulse = 0.85 + Math.sin(time * 4) * 0.15;
+  cashPad.ring.scale.setScalar(pulse); if (buildPad) buildPad.ring.scale.setScalar(pulse);
+  saveTimer += dt; if (saveTimer > 3) { saveTimer = 0; save(); }
+  updateCamera(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+
+// Für automatische Tests
+window.__imbiss = { state, player, customers };
+</script>
+</body>
+</html>
