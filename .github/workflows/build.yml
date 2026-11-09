@@ -1,0 +1,19 @@
+# Baut bei jedem Push die Upload-Pakete (ZIPs) für itch.io, CrazyGames und Poki.
+# Download: GitHub -> Actions -> letzter Lauf -> "Artifacts" -> komet-pakete
+name: Pakete bauen
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ZIPs bauen
+        run: bash tools/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: komet-pakete
+          path: dist/*.zip

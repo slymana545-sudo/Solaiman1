@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>KOMET</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="description" content="KOMET – ein Arcade-Spiel: Spring als Komet von Planet zu Planet, sammle Sterne und schalte neue Schweife frei.">
+  <meta name="theme-color" content="#0b1030">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <canvas id="game" aria-label="Spielfeld"></canvas>
+
+    <!-- HUD -->
+    <div id="hud" class="hud" hidden>
+      <button class="icon-btn" id="btn-pause" data-i18n-label="paused" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></svg>
+      </button>
+      <div class="hud-score"><span id="hud-score">0</span><small id="hud-combo"></small></div>
+      <div class="chip hud-stars"><span class="star-glyph" aria-hidden="true">★</span><span id="hud-stars">0</span></div>
+    </div>
+    <div id="hint" class="hint" hidden><span data-i18n="tapToLaunch"></span></div>
+
+    <!-- Menü -->
+    <section id="screen-menu" class="screen screen-menu">
+      <div class="menu-top">
+        <div class="chip"><span class="label" data-i18n="best"></span><strong id="menu-best">0</strong></div>
+        <div class="chip"><span class="star-glyph" aria-hidden="true">★</span><strong id="menu-stars">0</strong></div>
+      </div>
+      <div class="brand">
+        <h1 class="logo">KOMET</h1>
+        <p class="tagline" data-i18n="tagline"></p>
+      </div>
+      <div class="menu-actions">
+        <button class="btn btn-primary btn-big" id="btn-play" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>
+          <span data-i18n="play"></span>
+        </button>
+        <p class="howto" data-i18n="howto"></p>
+        <div class="menu-row">
+          <button class="btn btn-ghost" id="btn-shop" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18c4-1 8-5 10-9l2 2c-2 4-6 7-12 7z" opacity=".55"/><circle cx="17.5" cy="6.5" r="3.5"/></svg>
+            <span data-i18n="shop"></span>
+          </button>
+          <button class="icon-btn toggle" id="btn-sound" type="button" data-i18n-label="sound" aria-pressed="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="on" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path class="off" d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+          <button class="icon-btn toggle" id="btn-music" type="button" data-i18n-label="music" aria-pressed="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 17V6l10-2v11" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="7" cy="17" r="2.6"/><circle cx="17" cy="15" r="2.6"/><path class="off" d="M4 4l16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+          <button class="icon-btn lang-btn" id="btn-lang" type="button" data-i18n-label="language"><span id="lang-code">DE</span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pause -->
+    <section id="screen-pause" class="screen screen-center" hidden>
+      <div class="panel">
+        <h2 data-i18n="paused"></h2>
+        <button class="btn btn-primary" id="btn-resume" type="button"><span data-i18n="resume"></span></button>
+        <button class="btn btn-ghost" id="btn-pause-menu" type="button"><span data-i18n="menu"></span></button>
+      </div>
+    </section>
+
+    <!-- Game Over -->
+    <section id="screen-over" class="screen screen-center" hidden>
+      <div class="panel">
+        <p class="eyebrow" data-i18n="gameOver"></p>
+        <div class="final">
+          <span id="over-score" class="final-score">0</span>
+          <span class="final-label" data-i18n="score"></span>
+        </div>
+        <p id="over-best" class="new-best" data-i18n="newBest" hidden></p>
+        <dl class="stats">
+          <div><dt data-i18n="best"></dt><dd id="over-best-val">0</dd></div>
+          <div><dt data-i18n="starsRun"></dt><dd><span class="star-glyph" aria-hidden="true">★</span> <span id="over-stars">0</span></dd></div>
+        </dl>
+        <div class="revive" id="revive-box">
+          <button class="btn btn-revive" id="btn-revive-ad" type="button" hidden><span data-i18n="reviveAd"></span></button>
+          <button class="btn btn-revive" id="btn-revive-stars" type="button" hidden><span id="revive-stars-label"></span></button>
+        </div>
+        <button class="btn btn-primary" id="btn-retry" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5a7 7 0 1 1-6.6 4.7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M4 4v6h6z"/></svg>
+          <span data-i18n="retry"></span>
+        </button>
+        <div class="menu-row">
+          <button class="btn btn-ghost" id="btn-over-menu" type="button"><span data-i18n="menu"></span></button>
+          <button class="btn btn-ghost" id="btn-share" type="button" hidden><span data-i18n="share"></span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Shop -->
+    <section id="screen-shop" class="screen screen-shop" hidden>
+      <header class="shop-head">
+        <button class="icon-btn" id="btn-shop-back" type="button" data-i18n-label="back">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <h2 data-i18n="shop"></h2>
+        <div class="chip"><span class="star-glyph" aria-hidden="true">★</span><strong id="shop-stars">0</strong></div>
+      </header>
+      <div id="shop-grid" class="shop-grid"></div>
+    </section>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/skins.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/platform.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
