@@ -74,6 +74,17 @@
   .rec.no { color: #aaa; } .rec.no span { filter: grayscale(1) brightness(.2); opacity: .35; }
   .newrec { font-size: 72px; line-height: 1; margin: 6px 0; animation: spin 1s ease; }
   @keyframes spin { from { transform: rotate(-200deg) scale(.2); } to { transform: none; } }
+  #dialog { position: fixed; inset: auto 0 0 0; padding: 0 max(12px, env(safe-area-inset-right, 0px)) calc(14px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); display: flex; justify-content: center; cursor: pointer; z-index: 5; }
+  .dlg { width: min(560px, 100%); background: var(--cream); border-radius: 22px; padding: 16px 18px 12px; box-shadow: 0 8px 0 rgba(0,0,0,.25); border: 3px solid var(--ink); animation: pop .25s ease; }
+  .dlg.narrator { background: #1d1b2e; color: #fff; border-color: #fff; }
+  .who { display: inline-block; background: var(--ketchup); color: #fff; font-weight: 900; font-size: 14px; letter-spacing: .04em; padding: 4px 12px; border-radius: 999px; margin: -30px 0 8px; box-shadow: 0 3px 0 rgba(0,0,0,.2); }
+  .txt { font-size: 17px; line-height: 1.45; font-weight: 600; min-height: 3em; }
+  .next { text-align: right; font-size: 12px; font-weight: 800; opacity: .55; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .15; } }
+  .choices { display: grid; gap: 8px; margin-top: 10px; }
+  .choice { background: var(--mustard); color: var(--ink); border-radius: 16px; padding: 14px; font-weight: 900; font-size: 16px; box-shadow: 0 4px 0 #c98a00; text-align: left; }
+  .choice:first-child { background: #ffffff; box-shadow: 0 4px 0 #aaa; }
+  #skipbtn { position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); right: max(12px, env(safe-area-inset-right, 0px)); background: rgba(255,255,255,.85); border-radius: 999px; padding: 8px 14px; font-weight: 800; z-index: 6; }
 </style>
 </head>
 <body>
@@ -100,7 +111,7 @@
     <h1>IMBISS<br><em>IMPERIUM</em></h1>
     <p>Erobere die Stadt, Stadtteil für Stadtteil. Schlag die Konkurrenz, überleb das Chaos, entdeck verrückte Rezepte.</p>
     <div class="levels" id="levels"></div>
-    <button class="link" id="bookbtn" type="button">📖 Rezeptbuch</button>
+    <div><button class="link" id="introbtn" type="button">🎬 Vorgeschichte</button> <button class="link" id="bookbtn" type="button">📖 Rezeptbuch</button></div>
   </div>
 </div>
 
@@ -134,6 +145,17 @@
     <button class="big" id="winnext" type="button">Nächster Stadtteil</button>
   </div>
 </div>
+
+<!-- Dialog -->
+<div id="dialog" hidden>
+  <div class="dlg" id="dlgbox">
+    <div class="who" id="dlgwho"></div>
+    <div class="txt" id="dlgtxt"></div>
+    <div class="choices" id="dlgchoices"></div>
+    <div class="next" id="dlgnext">▼ Tippen</div>
+  </div>
+</div>
+<button id="skipbtn" type="button" hidden>Überspringen ⏭</button>
 
 <!-- Werbung (Demo) -->
 <div class="overlay" id="adscreen" hidden>
@@ -200,8 +222,9 @@ const save = {
   money: store.get('money', 0),
   unlocked: store.get('unlocked', 0),
   recipes: store.get('recipes', ['curry']),
+  introSeen: store.get('introSeen', false),
 };
-function persist() { store.set('money', Math.floor(save.money)); store.set('unlocked', save.unlocked); store.set('recipes', save.recipes); }
+function persist() { store.set('money', Math.floor(save.money)); store.set('unlocked', save.unlocked); store.set('recipes', save.recipes); store.set('introSeen', save.introSeen); }
 
 // ---------------------------------------------------------------- Three.js
 const scene = new THREE.Scene();
@@ -218,7 +241,8 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 resize(); addEventListener('resize', resize);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a60, 0.8));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x8a7a60, 0.8);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff4e0, 0.72);
 sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
 Object.assign(sun.shadow.camera, { left: -24, right: 24, top: 24, bottom: -24, near: 1, far: 70 });
@@ -344,6 +368,7 @@ function loadLevel(i) {
   particles.length = 0;
   world = new THREE.Group(); scene.add(world);
   L = LEVELS[i];
+  hemi.intensity = 0.8; sun.intensity = 0.72;
   scene.background = new THREE.Color(L.sky);
   scene.fog = new THREE.Fog(L.sky, 38, 85);
 
@@ -385,8 +410,11 @@ function loadLevel(i) {
   const cash = makePad(-7.9, -1.3, 0x3fbf7f, 0.95);
   const cashLbl = makeLabel(['KASSE'], { w: 1.8 }); cashLbl.position.set(-7.9, 2.6, -2.6); world.add(cashLbl);
 
-  const player = makePerson(0xe8473b, 0x2d3047);
-  box(0.66, 0.12, 0.4, 0xffffff, 0, 1.5, 0, player.g);
+  const o = OUTFITS[i];
+  const player = makePerson(o.shirt, o.pants, 0xd9a27a, 0x2a1d14);
+  if (o.hat) box(0.56, 0.2, 0.56, o.hat, 0, 2.02, 0, player.g);
+  if (o.tie) box(0.12, 0.5, 0.05, o.tie, 0, 1.2, 0.19, player.g);
+  const nameTag = makeLabel(['Sami'], { w: 1.4, bg: 'rgba(232,71,59,.9)' }); nameTag.position.y = 2.7; player.g.add(nameTag);
   player.g.position.set(-7.9, 0, 1);
 
   G = {
@@ -807,7 +835,7 @@ function renderMap() {
     const done = i < save.unlocked, open = i <= save.unlocked;
     b.className = 'lvl' + (open ? '' : ' locked') + (i === Math.min(save.unlocked, LEVELS.length - 1) ? ' current' : '');
     b.innerHTML = `<span class="ic">${open ? lv.icon : '🔒'}</span><span class="t"><b>${i + 1}. ${lv.name}</b><small>${done ? '✅ Erobert' : open ? 'Gegner: ' + lv.rival : 'Erobere zuerst ' + LEVELS[i - 1].name}</small></span><span>${open ? '▶' : ''}</span>`;
-    if (open) b.addEventListener('click', () => startLevel(i)); else b.disabled = true;
+    if (open) b.addEventListener('click', () => (i === 0 && !save.introSeen) ? startIntro() : startLevel(i)); else b.disabled = true;
     el.appendChild(b);
   });
 }
@@ -823,12 +851,12 @@ function renderBook() {
 function startLevel(i) {
   loadLevel(i);
   $('mapscreen').hidden = true; $('winscreen').hidden = true; $('hud').hidden = false; $('adbtn').hidden = false;
-  paused = false;
   banner(L.icon + ' ' + L.name.toUpperCase());
+  paused = true;
+  playDialog(STORY.levelStart[i], () => { paused = false; });
   setTip(i === 0 && save.recipes.length === 1
     ? (isTouch ? 'Finger ziehen = laufen. Stell dich auf das grüne Feld an der Kasse. Hol dir 100% der Kunden!' : 'WASD = laufen. Stell dich auf das grüne Feld an der Kasse. Hol dir 100% der Kunden!')
     : 'Schlag ' + L.rival + '! Hol dir 100% der Kunden.');
-  setTimeout(() => { if (!G.firstSale) return; }, 0);
 }
 function openMap() { paused = true; persist(); renderMap(); $('hud').hidden = true; $('adbtn').hidden = true; $('mapscreen').hidden = false; setTip(''); }
 
@@ -836,7 +864,11 @@ $('mapbtn').addEventListener('click', openMap);
 $('bookbtn').addEventListener('click', () => { renderBook(); $('bookscreen').hidden = false; });
 $('bookclose').addEventListener('click', () => { $('bookscreen').hidden = true; });
 $('recclose').addEventListener('click', () => { $('recscreen').hidden = true; paused = false; });
-$('winnext').addEventListener('click', () => { $('winscreen').hidden = true; if (G.level < LEVELS.length - 1) startLevel(G.level + 1); else openMap(); });
+$('winnext').addEventListener('click', () => {
+  $('winscreen').hidden = true; paused = true;
+  const lv = G.level;
+  playDialog(STORY.afterWin[lv], () => { if (lv < LEVELS.length - 1) startLevel(lv + 1); else openMap(); });
+});
 
 // Belohnungswerbung (Demo): So verdienst du später Geld.
 let adCooldown = 0;
@@ -916,7 +948,8 @@ function updateCamera(dt, snap) {
 let last = performance.now(), dtGlobal = 0, saveTimer = 0;
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 1 / 20); last = now; dtGlobal = dt;
-  if (G) {
+  if (mode === 'intro') updateIntro(dt);
+  else if (G) {
     if (!paused) {
       G.time += dt;
       updatePlayer(dt); updateCustomers(dt); updateBuilds(); updateSabotage(dt);
@@ -935,11 +968,212 @@ function frame(now) {
     }
     const pulse = 0.85 + Math.sin(performance.now() / 250) * 0.15;
     [G.cash, G.buildPad, G.labPad, G.bombPad, G.fuse && G.fuse.pad].forEach(p => p && p.ring.scale.setScalar(pulse));
-    if (!paused) updateCamera(dt); else { G.player.g.rotation.y += dt * 0.5; updateCamera(dt); }
+    if (paused && !$('mapscreen').hidden) G.player.g.rotation.y += dt * 0.5;
+    updateCamera(dt);
   }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
+
+
+// ---------------------------------------------------------------- Geschichte
+// Sami sieht von Level zu Level besser aus.
+const OUTFITS = [
+  { shirt: 0x6b6b5e, pants: 0x4a4036, hat: 0x8a3b2e },  // Kapuzenpulli und Mütze
+  { shirt: 0xe8473b, pants: 0x2d3047 },                 // erstes eigenes Imbiss-Shirt
+  { shirt: 0xff9f43, pants: 0x2d3047, hat: 0xffffff },  // Strand-Look mit Kappe
+  { shirt: 0xffffff, pants: 0x2d3047, hat: 0xffffff },  // Kochjacke
+  { shirt: 0x1d1b2e, pants: 0x1d1b2e, tie: 0xe8473b },  // Anzug
+];
+
+const STORY = {
+  levelStart: [
+    [{ who: 'Burger-Bernd', text: 'Hey, du Penner! Das hier ist MEIN Hinterhof. Verschwinde mit deiner Würstchenbude!' },
+     { who: 'Sami', text: 'Ich hab zwei Jahre auf der Straße überlebt. Dich überleb ich auch.' }],
+    [{ who: 'Döner-Dieter', text: 'Ah, der Neue vom Hinterhof. Am Bahnhof gelten andere Regeln, Kleiner.' },
+     { who: 'Sami', text: 'Dann lern ich eben die neuen Regeln. Und dann brech ich sie.' }],
+    [{ who: 'Taco-Tina', text: 'Sonne, Strand und MEINE Tacos. Für dich ist hier kein Platz!' },
+     { who: 'Sami', text: 'Mal sehen, ob deine Kunden schon Raketen-Ramen kennen.' }],
+    [{ who: 'Pizza-Paolo', text: 'Weißt du eigentlich, mit wem du dich anlegst? Ich arbeite für den CHEF.' },
+     { who: 'Sami', text: 'Der Chef? Welcher Chef?' },
+     { who: 'Pizza-Paolo', text: 'Das wirst du noch früh genug merken...' }],
+    [{ who: 'Sushi-Sam', text: 'Endlich lernen wir uns kennen. Das schwarze Auto gehört mir. Und die Tasche auch.' },
+     { who: 'Sushi-Sam', text: 'Ich will mein Geld zurück. Gib auf, oder ich mache dich hier am Flughafen fertig.' },
+     { who: 'Sami', text: 'Ich hab nichts mehr zu verlieren. Du schon.' }],
+  ],
+  afterWin: [
+    [{ who: '', text: 'Burger-Bernd packt seine Sachen. Aber in der Nacht steht ein Mann im schwarzen Anzug vor Samis Imbiss...' },
+     { who: 'Mann im Anzug', text: 'Schöner Laden. Wäre doch schade, wenn ihm etwas zustößt.' }],
+    [{ who: '', text: 'Am nächsten Morgen klebt ein Zettel an der Tür:' },
+     { who: 'Zettel', text: 'WIR WISSEN, WAS DU GEFUNDEN HAST.' },
+     { who: 'Sami', text: 'Die Tasche... jemand sucht sie.' }],
+    [{ who: 'Oma Helga', text: 'Sami? Bist du das? Wir haben früher zusammen unter der Brücke geschlafen!' },
+     { who: 'Sami', text: 'Helga! Ab heute bekommst du jeden Tag ein Essen umsonst. Versprochen.' },
+     { who: '', text: 'Sami vergisst nie, woher er kommt.' }],
+    [{ who: 'Pizza-Paolo', text: 'Okay, okay, ich sag dir alles! Alle Imbisse gehören Sushi-Sam. Das Geld in der Tasche war sein Schwarzgeld.' },
+     { who: 'Sami', text: 'Dann wird es Zeit, dass ich ihn besuche.' }],
+    [{ who: 'Sushi-Sam', text: 'Nein... das kann nicht sein! Ein Obdachloser übernimmt mein Imperium?!' },
+     { who: '', text: 'Die Polizei findet Sams geheime Bücher. Er muss für lange Zeit ins Gefängnis.' },
+     { who: 'Sami', text: 'Und das Geld aus der Tasche gebe ich zurück. Mit einem Café, in dem Leute von der Straße umsonst essen.' },
+     { who: '', text: 'Vom Bordstein zum Imbiss-Imperium. ENDE... vorerst.' }],
+  ],
+};
+
+// ---------- Dialog-System ----------
+let dlg = null;
+function playDialog(lines, onDone) {
+  dlg = { lines, i: -1, onDone, typing: null };
+  $('dialog').hidden = false;
+  nextLine();
+}
+function nextLine() {
+  if (!dlg) return;
+  if (dlg.typing) { clearInterval(dlg.typing); dlg.typing = null; $('dlgtxt').textContent = dlg.lines[dlg.i].text; return; }
+  dlg.i++;
+  const line = dlg.lines[dlg.i];
+  if (!line) { const done = dlg.onDone; dlg = null; $('dialog').hidden = true; if (done) done(); return; }
+  if (line.enter) line.enter();
+  $('dlgwho').textContent = line.who || '';
+  $('dlgwho').hidden = !line.who;
+  $('dlgbox').classList.toggle('narrator', !line.who);
+  const el = $('dlgtxt'); el.textContent = '';
+  const ch = $('dlgchoices'); ch.innerHTML = '';
+  $('dlgnext').hidden = !!line.choices;
+  let k = 0;
+  dlg.typing = setInterval(() => {
+    k++; el.textContent = line.text.slice(0, k);
+    if (k >= line.text.length) { clearInterval(dlg.typing); dlg.typing = null; showChoices(line); }
+  }, 22);
+}
+function showChoices(line) {
+  if (!line.choices) return;
+  const ch = $('dlgchoices');
+  line.choices.forEach(c => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'choice'; b.textContent = c.label;
+    b.addEventListener('click', ev => { ev.stopPropagation(); c.pick(); });
+    ch.appendChild(b);
+  });
+}
+$('dialog').addEventListener('click', () => { if (dlg && !(dlg.lines[dlg.i] && dlg.lines[dlg.i].choices && !dlg.typing)) nextLine(); });
+
+// ---------- Vorspann in 3D ----------
+let mode = 'game';
+let intro = null;
+function buildIntro() {
+  if (world) scene.remove(world);
+  particles.length = 0;
+  world = new THREE.Group(); scene.add(world);
+  scene.background = new THREE.Color(0x0b1026);
+  scene.fog = new THREE.Fog(0x0b1026, 12, 40);
+  hemi.intensity = 0.45; sun.intensity = 0.2;
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), mat(0x24242e));
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; world.add(ground);
+  box(80, 0.15, 5, 0x3b3b46, 0, 0.07, 0.5);            // Gehweg
+  box(80, 0.06, 8, 0x1c1c24, 0, 0.03, 7);              // Straße
+  for (let x = -40; x < 40; x += 6) box(3, 0.02, 0.25, 0x777777, x, 0.07, 7);
+  box(30, 6, 1, 0x5a4a4a, 0, 3, -2.5);                 // Hauswand
+  [[-4, 0x3d6b8a], [3, 0x8a3d6b], [7, 0x6b8a3d]].forEach(([x, c]) => box(2.2, 1.2, 0.05, c, x, 2.2, -1.98)); // Graffiti
+  box(1.2, 0.08, 1.6, 0x9b7b53, -1.2, 0.18, -0.9);     // Pappe
+  box(0.25, 0.3, 0.25, 0xcccccc, 0.2, 0.3, 0);          // Becher
+  // Laterne mit warmem Licht
+  cyl(0.08, 0.1, 4.5, 0x2d2d38, 3, 2.25, -1.6); box(0.8, 0.18, 0.4, 0x2d2d38, 2.7, 4.5, -1.4);
+  const lampLight = new THREE.PointLight(0xffc27a, 1.6, 14); lampLight.position.set(2.6, 4.2, -1.2); world.add(lampLight);
+  // Sami
+  const o = OUTFITS[0];
+  const sami = makePerson(o.shirt, o.pants, 0xd9a27a, 0x2a1d14);
+  box(0.56, 0.22, 0.56, o.hat, 0, 2.02, 0, sami.g);
+  sami.g.position.set(-1.2, -0.42, -0.9);
+  sami.hipL.rotation.x = sami.hipR.rotation.x = -1.45;
+  sami.shL.rotation.x = sami.shR.rotation.x = -0.6;
+  // Auto und Tasche
+  const car = new THREE.Group(); world.add(car);
+  box(4.2, 1.0, 1.9, 0x111111, 0, 0.8, 0, car); box(2.4, 0.8, 1.7, 0x161616, -0.3, 1.6, 0, car);
+  box(0.1, 0.3, 0.5, 0xfff2b0, 2.12, 0.9, 0.55, car); box(0.1, 0.3, 0.5, 0xfff2b0, 2.12, 0.9, -0.55, car);
+  [[-1.4, 0.95], [1.4, 0.95], [-1.4, -0.95], [1.4, -0.95]].forEach(([x, z]) => { const w = cyl(0.4, 0.4, 0.3, 0x222222, x, 0.4, z, car); w.rotation.x = Math.PI / 2; });
+  car.position.set(-40, 0, 6.5);
+  const bag = new THREE.Group(); world.add(bag);
+  box(0.9, 0.55, 0.45, 0x5b3a1e, 0, 0.28, 0, bag); box(0.5, 0.08, 0.08, 0x2d1d0e, 0, 0.62, 0, bag);
+  bag.visible = false;
+  // Regen
+  const drops = [];
+  const dropMat = new THREE.MeshBasicMaterial({ color: 0x9fb8ff, transparent: true, opacity: 0.45 });
+  const dropGeo = new THREE.BoxGeometry(0.03, 0.6, 0.03);
+  for (let i = 0; i < 220; i++) { const d = new THREE.Mesh(dropGeo, dropMat); d.position.set(rand(-14, 14), rand(0, 14), rand(-2, 12)); world.add(d); drops.push(d); }
+  intro = { t: 0, beat: 0, sami, car, bag, drops, lampLight, carRun: false, walk: false, opened: false,
+    cam: new THREE.Vector3(0, 4, 13), look: new THREE.Vector3(-1, 1, 0), camT: new THREE.Vector3(0, 4, 13), lookT: new THREE.Vector3(-1, 1, 0), lookNow: new THREE.Vector3(-1, 1, 0) };
+}
+function shot(cx, cy, cz, lx, ly, lz) { intro.camT.set(cx, cy, cz); intro.lookT.set(lx, ly, lz); }
+function updateIntro(dt) {
+  const I = intro; I.t += dt;
+  I.drops.forEach(d => { d.position.y -= 22 * dt; d.position.x -= 3 * dt; if (d.position.y < 0) { d.position.y = rand(10, 14); d.position.x = rand(-14, 14); } });
+  I.lampLight.intensity = 1.5 + Math.sin(I.t * 13) * 0.05 + (Math.random() < 0.01 ? -0.8 : 0);
+  if (I.carRun) {
+    I.car.position.x += dt * 26;
+    if (!I.bag.visible && I.car.position.x > 0) { I.bag.visible = true; I.bag.position.set(1.5, 1.2, 5); I.bag.userData.vy = 3; I.bag.userData.vz = -3.5; }
+  }
+  if (I.bag.visible && I.bag.userData.vy !== undefined) {
+    const b = I.bag; b.userData.vy -= 20 * dt; b.position.y += b.userData.vy * dt; b.position.z += b.userData.vz * dt; b.rotation.z += dt * 6;
+    if (b.position.y <= 0) { b.position.y = 0; b.rotation.z = 0.2; b.userData.vz *= 0.5; if (b.position.z < 1.6) { b.userData.vz = 0; delete b.userData.vy; } else b.userData.vy = 2; }
+  }
+  if (I.walk) {
+    const s = I.sami;
+    s.g.position.y = Math.min(0, s.g.position.y + dt * 1.5);
+    s.hipL.rotation.x *= 0.85; s.shL.rotation.x *= 0.85; s.shR.rotation.x *= 0.85;
+    const tx = 0.6, tz = 1.4, dx = tx - s.g.position.x, dz = tz - s.g.position.z, len = Math.hypot(dx, dz);
+    if (s.g.position.y > -0.05 && len > 0.1) { s.g.position.x += dx / len * 2 * dt; s.g.position.z += dz / len * 2 * dt; s.g.rotation.y = Math.atan2(dx, dz); animateWalk(s, true, dt); }
+    else if (len <= 0.1) { animateWalk(s, false, dt); s.g.rotation.y = lerpAngle(s.g.rotation.y, Math.PI / 2, 0.1); }
+  }
+  if (I.opened && Math.random() < 0.5) spawnParts(1.5, 0.6, 1.6, [0x3fbf7f, 0x2e9e5e, 0xffd700], 2, 3, { up: 6 });
+  I.cam.lerp(I.camT, 1 - Math.exp(-dt * 1.8)); I.lookNow.lerp(I.lookT, 1 - Math.exp(-dt * 2.2));
+  const k = camera.aspect < 0.8 ? 1.9 : 1;
+  camera.position.copy(I.lookNow).add(I.cam.clone().sub(I.lookNow).multiplyScalar(k)); camera.lookAt(I.lookNow);
+  updateParts(dt);
+}
+function introLines() {
+  const choice = {
+    who: '', text: 'Was soll Sami mit dem Geld machen?',
+    enter() { shot(4, 2.6, 6, 1, 1, 1.4); },
+    choices: [
+      { label: '💸 Alles verprassen', pick() {
+          playDialog([
+            { who: '', text: 'Eine Woche lang Party, teure Klamotten, Taxi überallhin...', enter() { spawnParts(1.5, 1, 1.6, CONFETTI, 60, 7); } },
+            { who: '', text: 'Nach sieben Tagen ist alles weg. Sami sitzt wieder im Regen. Kälter als vorher.' },
+            { who: '', text: 'Zum Glück war das nur ein Gedanke. Nochmal überlegen?' },
+          ], () => playDialog([choice], null));
+        } },
+      { label: '🌭 Klug sein: einen Imbiss eröffnen', pick() {
+          playDialog([
+            { who: 'Sami', text: 'Nein. Diesmal mach ich es richtig. Ich kauf mir einen kleinen Imbiss und arbeite mich hoch.', enter() { shot(1.6, 1.9, 4.6, 0.6, 1.6, 1.4); } },
+            { who: '', text: 'Doch das schwarze Auto kommt nie zurück. Und irgendwo in der Stadt sucht jemand diese Tasche...', enter() { shot(-6, 6, 14, 0, 1, 2); } },
+          ], () => { save.introSeen = true; persist(); endIntro(); startLevel(0); });
+        } },
+    ],
+  };
+  return [
+    { who: '', text: 'Ein kalter Winterabend in der Stadt. Es regnet seit Stunden.', enter() { shot(0, 4, 13, -1, 1, 0); } },
+    { who: '', text: 'Das ist Sami. Seit zwei Jahren lebt er auf der Straße. Die Leute laufen an ihm vorbei, als wäre er unsichtbar.', enter() { shot(0.5, 1.8, 4, -1.2, 0.9, -0.9); } },
+    { who: 'Sami', text: 'Noch eine Nacht... irgendwie schaff ich das schon.' },
+    { who: '', text: 'Plötzlich rast ein schwarzes Auto mit quietschenden Reifen vorbei...', enter() { shot(-5, 3, 12, 2, 1, 5); intro.carRun = true; } },
+    { who: 'Sami', text: 'Hey! Die haben was verloren!', enter() { shot(3.5, 2.2, 5.5, 1, 0.8, 1.5); intro.walk = true; } },
+    { who: '', text: 'Sami öffnet die Tasche...', enter() { shot(2.6, 1.6, 3.4, 1.4, 0.4, 1.6); } },
+    { who: 'Sami', text: 'Das... das sind mindestens 50.000 Euro!', enter() { intro.opened = true; spawnParts(1.5, 0.6, 1.6, [0x3fbf7f, 0x2e9e5e, 0xffd700], 50, 5, { up: 8 }); } },
+    choice,
+  ];
+}
+function startIntro() {
+  $('mapscreen').hidden = true; $('hud').hidden = true; $('adbtn').hidden = true; setTip('');
+  mode = 'intro'; paused = true;
+  buildIntro();
+  $('skipbtn').hidden = false;
+  playDialog(introLines(), null);
+}
+function endIntro() {
+  mode = 'game'; intro = null; $('skipbtn').hidden = true;
+  hemi.intensity = 0.8; sun.intensity = 0.72;
+  if (dlg) { if (dlg.typing) clearInterval(dlg.typing); dlg = null; $('dialog').hidden = true; }
+}
+$('skipbtn').addEventListener('click', e => { e.stopPropagation(); save.introSeen = true; persist(); endIntro(); startLevel(0); });
+$('introbtn').addEventListener('click', startIntro);
 
 // ---------------------------------------------------------------- Start
 loadLevel(Math.min(save.unlocked, LEVELS.length - 1));
@@ -947,7 +1181,7 @@ renderMap();
 setTip('');
 requestAnimationFrame(frame);
 addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
-window.__imbiss = { get G() { return G; }, save, startLevel, spawnCustomer, startSabotage, discoverRecipe, meterAdd, set paused(v) { paused = v; } };
+window.__imbiss = { get G() { return G; }, save, startLevel, spawnCustomer, startSabotage, discoverRecipe, meterAdd, startIntro, get mode() { return mode; }, set paused(v) { paused = v; } };
 </script>
 </body>
 </html>
