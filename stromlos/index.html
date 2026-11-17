@@ -82,7 +82,7 @@
 <div id="prompt" class="hud" hidden></div>
 <div id="toast" class="hud" hidden></div>
 <div id="vignette" class="hud"></div>
-<div id="hint" class="hud" hidden><kbd>WASD</kbd>laufen &nbsp; <kbd>Maus</kbd>Kamera &nbsp; <kbd>E</kbd>benutzen &nbsp; <kbd>B</kbd>bauen</div>
+<div id="hint" class="hud" hidden><kbd>WASD</kbd>laufen &nbsp; <kbd>Maus</kbd>Kamera &nbsp; <kbd>E</kbd>benutzen &nbsp; <kbd>B</kbd>bauen (Maus wird frei)</div>
 <div id="build" hidden></div>
 <div id="lockhint" class="hud" hidden>Ins Bild klicken = Kamera mit der Maus steuern</div>
 
@@ -454,7 +454,7 @@ addEventListener('keydown', e => {
   keys[k] = true;
   if (k === 'e') { if (!eHeld) ePressed = true; eHeld = true; }
   if (k === 'b' && running) toggleBuild();
-  if (k === 'escape') $('build').hidden = true;
+  if (k === 'escape') closeBuild(false);
   if (!$('build').hidden) { const bp = BLUEPRINTS.find(b => b.key === k); if (bp) tryBuild(bp); }
   if ([' ', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault();
 });
@@ -465,17 +465,18 @@ let camYaw = 0.6, camPitch = 0.55, camDist = 9;
 const locked = () => document.pointerLockElement === renderer.domElement;
 renderer.domElement.addEventListener('click', () => {
   if (dlg) { nextLine(); return; }
+  if (!$('build').hidden) return; // erst im Menü auswählen
   if (running && !locked()) { try { const r = renderer.domElement.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) {} }
 });
 addEventListener('pointermove', e => {
-  if (!running || dlg) return;
+  if (!running || dlg || !$('build').hidden) return; // Bau-Menü offen: Maus ist frei
   // Ohne eingefangene Maus (z. B. wenn der Browser es blockiert) dreht die Kamera trotzdem mit.
   const dx = e.movementX || 0, dy = e.movementY || 0;
   if (Math.abs(dx) > 200 || Math.abs(dy) > 200) return; // Sprünge ignorieren
   camYaw -= dx * (locked() ? 0.0035 : 0.005);
   camPitch = clamp(camPitch + dy * 0.003, 0.15, 1.2);
 });
-document.addEventListener('pointerlockchange', () => { $('lockhint').hidden = locked() || !running; });
+document.addEventListener('pointerlockchange', () => { $('lockhint').hidden = locked() || !running || !$('build').hidden; });
 addEventListener('wheel', e => { camDist = clamp(camDist + e.deltaY * 0.01, 4, 18); }, { passive: true });
 
 // ---------------------------------------------------------------- Bauen
@@ -484,13 +485,34 @@ function renderBuild() {
   const el = $('build'); el.innerHTML = '';
   BLUEPRINTS.forEach(bp => {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'bp'; b.disabled = !canAfford(bp);
-    b.innerHTML = `<span class="k">[${bp.key}]</span><div class="n">${bp.name}</div><div class="c">${Object.entries(bp.cost).map(([k, v]) => `${ITEM_NAMES[k]} ${S.inv[k]}/${v}`).join('<br>')}</div><div class="e">${bp.makes}</div>`;
+    b.innerHTML = `<span class="k">[${bp.key}]</span><div class="n">${bp.name}</div><div class="c"></div><div class="e">${bp.makes}</div>`;
+    b.dataset.id = bp.id;
     b.title = bp.info;
     b.addEventListener('click', () => tryBuild(bp));
     el.appendChild(b);
   });
+  refreshBuild();
 }
-function toggleBuild() { const el = $('build'); el.hidden = !el.hidden; if (!el.hidden) renderBuild(); }
+// Nur Zahlen aktualisieren, Knöpfe bleiben bestehen (sonst gehen Klicks verloren)
+function refreshBuild() {
+  $('build').querySelectorAll('.bp').forEach(btn => {
+    const bp = BLUEPRINTS.find(x => x.id === btn.dataset.id);
+    btn.disabled = !canAfford(bp);
+    const html = Object.entries(bp.cost).map(([k, v]) => `${ITEM_NAMES[k]} ${S.inv[k]}/${v}`).join('<br>');
+    const c = btn.querySelector('.c'); if (c.innerHTML !== html) c.innerHTML = html;
+  });
+}
+function relock() {
+  if (!running || locked()) return;
+  try { const r = renderer.domElement.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+}
+function openBuild() {
+  $('build').hidden = false; renderBuild();
+  if (document.exitPointerLock && locked()) document.exitPointerLock(); // Maus frei zum Auswählen
+  $('lockhint').hidden = true;
+}
+function closeBuild(relockMouse) { $('build').hidden = true; if (relockMouse) relock(); }
+function toggleBuild() { if ($('build').hidden) openBuild(); else closeBuild(true); }
 function tryBuild(bp) {
   if (!canAfford(bp)) { toast('Dir fehlen Teile'); return; }
   const p = sami.g.position, a = sami.g.rotation.y;
@@ -503,7 +525,7 @@ function tryBuild(bp) {
   if (bp.id === 'battery') S.cap += 150;
   collider(x, z, 0.9, 0.9);
   toast(bp.name + ' gebaut');
-  $('build').hidden = true;
+  closeBuild(true);
   const o = builtObjs[builtObjs.length - 1];
   if (bp.id !== 'dynamo' && bp.id !== 'battery' && !connected(o)) toast('⚠ Nicht angeschlossen: zu weit vom Dynamo');
   if (bp.id === 'dynamo' && !S.story.dynamo) { S.story.dynamo = true; say([['Sami', 'Ein altes Fahrrad, ein Dynamo aus einem Roller... Wenn das klappt, hab ich heute Nacht Wärme.']]); }
@@ -724,7 +746,7 @@ function updateHUD() {
   const n = pedaling ? null : nearest();
   const pr = pedaling ? '⚡ Strampeln... E loslassen zum Absteigen' : promptFor(n);
   $('prompt').innerHTML = pr; $('prompt').hidden = !pr;
-  if (!$('build').hidden) renderBuild();
+  if (!$('build').hidden) refreshBuild();
 }
 
 // ---------------------------------------------------------------- Kamera
