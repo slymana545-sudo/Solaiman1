@@ -43,6 +43,7 @@
   kbd { display: inline-block; min-width: 24px; padding: 2px 7px; border-radius: 6px; background: var(--amber); color: var(--ink); font-weight: 800; font-family: inherit; text-align: center; margin-right: 6px; }
   #hint { bottom: 14px; left: 14px; font-size: 12px; color: var(--muted); }
   #toast { bottom: 140px; left: 50%; transform: translateX(-50%); font-size: 22px; font-weight: 800; text-shadow: 0 2px 10px #000; white-space: nowrap; }
+  #lockhint { top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 10px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; font-size: 14px; }
   #vignette { inset: 0; background: radial-gradient(ellipse at center, transparent 50%, rgba(80,160,255,.45) 100%); opacity: 0; transition: opacity .5s; }
 
   /* Bau-Menü */
@@ -81,8 +82,9 @@
 <div id="prompt" class="hud" hidden></div>
 <div id="toast" class="hud" hidden></div>
 <div id="vignette" class="hud"></div>
-<div id="hint" class="hud" hidden><kbd>WASD</kbd>laufen &nbsp; <kbd>Maus</kbd>ziehen = Kamera &nbsp; <kbd>E</kbd>benutzen &nbsp; <kbd>B</kbd>bauen</div>
+<div id="hint" class="hud" hidden><kbd>WASD</kbd>laufen &nbsp; <kbd>Maus</kbd>Kamera &nbsp; <kbd>E</kbd>benutzen &nbsp; <kbd>B</kbd>bauen</div>
 <div id="build" hidden></div>
+<div id="lockhint" class="hud" hidden>Ins Bild klicken = Kamera mit der Maus steuern</div>
 
 <div class="overlay" id="title">
   <div class="card">
@@ -90,7 +92,7 @@
     <p>Seit dem großen Stromausfall ist die Stadt dunkel. Nur der Konzern <b>BlackGrid</b> hat noch Strom, für alle, die zahlen können.<br>Sami kann nicht zahlen. Sami hat nur Schrott.</p>
     <div class="keys">
       <kbd>WASD</kbd><span>laufen</span>
-      <kbd>Maus</kbd><span>gedrückt halten und ziehen = Kamera drehen, Mausrad = Zoom</span>
+      <kbd>Maus</kbd><span>Kamera drehen (einmal ins Bild klicken), Mausrad = Zoom, Esc = Mauszeiger zurück</span>
       <kbd>E</kbd><span>aufheben, benutzen, gedrückt halten = strampeln</span>
       <kbd>B</kbd><span>Bau-Menü</span>
     </div>
@@ -458,14 +460,22 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys[k] = false; if (k === 'e') eHeld = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; eHeld = false; });
-let camYaw = 0.6, camPitch = 0.55, camDist = 9, dragging = false, lastMX = 0, lastMY = 0;
-renderer.domElement.addEventListener('pointerdown', e => { dragging = true; lastMX = e.clientX; lastMY = e.clientY; });
-addEventListener('pointerup', () => dragging = false);
-addEventListener('pointermove', e => {
-  if (!dragging) return;
-  camYaw -= (e.clientX - lastMX) * 0.006; camPitch = clamp(camPitch + (e.clientY - lastMY) * 0.004, 0.15, 1.2);
-  lastMX = e.clientX; lastMY = e.clientY;
+let camYaw = 0.6, camPitch = 0.55, camDist = 9;
+// Maus-Kamera: einmal klicken = Maus wird eingefangen, dann dreht die Kamera mit jeder Bewegung.
+const locked = () => document.pointerLockElement === renderer.domElement;
+renderer.domElement.addEventListener('click', () => {
+  if (dlg) { nextLine(); return; }
+  if (running && !locked()) { try { const r = renderer.domElement.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) {} }
 });
+addEventListener('pointermove', e => {
+  if (!running || dlg) return;
+  // Ohne eingefangene Maus (z. B. wenn der Browser es blockiert) dreht die Kamera trotzdem mit.
+  const dx = e.movementX || 0, dy = e.movementY || 0;
+  if (Math.abs(dx) > 200 || Math.abs(dy) > 200) return; // Sprünge ignorieren
+  camYaw -= dx * (locked() ? 0.0035 : 0.005);
+  camPitch = clamp(camPitch + dy * 0.003, 0.15, 1.2);
+});
+document.addEventListener('pointerlockchange', () => { $('lockhint').hidden = locked() || !running; });
 addEventListener('wheel', e => { camDist = clamp(camDist + e.deltaY * 0.01, 4, 18); }, { passive: true });
 
 // ---------------------------------------------------------------- Bauen
@@ -655,7 +665,7 @@ function morning() {
   if (S.quest === 4) advanceQuest();
   if (S.nightsSurvived === 1) say([['Sami', 'Ich lebe noch. Zum ersten Mal seit Wochen war mir nachts nicht kalt.'], ['Sami', 'Leute laufen hier mit leeren Handys rum, weil keiner Strom hat... Strom ist hier mehr wert als Geld.']]);
   if (S.nightsSurvived >= 3 && !S.story.win) {
-    S.story.win = true; running = false;
+    S.story.win = true; running = false; if (document.exitPointerLock) document.exitPointerLock();
     $('wintext').textContent = `Drei Nächte überlebt. Sami hat ${S.built.length} Dinge gebaut und ${S.inv.muenzen} Münzen. Als Nächstes: der Hinterhof, das Dach und das erste eigene Stromnetz für die Nachbarn. Das kommt in Stufe 2.`;
     $('win').hidden = false;
   }
@@ -667,7 +677,7 @@ function nightfall() {
   if (S.day === 1) say([['Sami', 'Die Sonne ist weg. Jetzt wird es richtig kalt... ich muss in der Nähe vom Heizlüfter bleiben.']]);
 }
 function die() {
-  running = false;
+  running = false; if (document.exitPointerLock) document.exitPointerLock();
   $('deadtitle').textContent = S.food <= 0 ? 'Sami ist vor Hunger und Kälte zusammengebrochen.' : 'Sami ist erfroren.';
   $('deadtext').textContent = 'Ohne Strom keine Wärme. Tipp: Strample tagsüber Strom auf Vorrat und halte den Heizlüfter nachts an.';
   $('dead').hidden = false;
@@ -762,6 +772,7 @@ function startGame(fresh) {
   ['stats', 'clock', 'inv', 'quest', 'hint'].forEach(id => $(id).hidden = false);
   $('title').hidden = true;
   running = true;
+  $('lockhint').hidden = false;
   if (fresh || !S.story.intro) {
     S.story.intro = true;
     say([
@@ -788,7 +799,7 @@ const baseColliders = W.colliders.length;
 S = freshState();
 camera.position.set(6, 6, -2);
 requestAnimationFrame(frame);
-window.__s = { get S() { return S; }, sami, startGame, keys, interact, nearest, tryBuild: id => tryBuild(BLUEPRINTS.find(b => b.id === id)), setE: v => { eHeld = v; }, get running() { return running; } };
+window.__s = { get S() { return S; }, get yaw() { return camYaw; }, sami, startGame, keys, interact, nearest, tryBuild: id => tryBuild(BLUEPRINTS.find(b => b.id === id)), setE: v => { eHeld = v; }, get running() { return running; } };
 </script>
 </body>
 </html>
