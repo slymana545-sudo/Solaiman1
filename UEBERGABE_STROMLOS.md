@@ -29,7 +29,7 @@
 
 | Stufe | Inhalt | Status |
 | --- | --- | --- |
-| 1. Straße | Schrott sammeln, Fahrrad-Dynamo (mehrere Dynamos im Netz = mehrfache Leistung), Heizlüfter, Lampe, Handy-Ladestation, Batterie (+60 Speicher), Akku-Speicher aus Autowrack (+150), 3 Nächte überleben | **fertig (Prototyp)** |
+| 1. Straße | Schrott sammeln, Fahrrad-Dynamo (mehrere Dynamos im Netz = mehrfache Leistung), Heizlüfter, Lampe, Handy-Ladestation, Batterie (+60 Speicher), Akku-Speicher aus Autowrack (+150), Wände mit Windschutz, 3 Nächte überleben | **fertig (Prototyp)** |
 | 2. Hinterhof | Autobatterien, Solarpanel auf Einkaufswagen, erste Nachbarn versorgen | offen |
 | 3. Dach | Windrad aus Schrott, mehr Strom | offen |
 | 4. Viertel | Kabel zu Häusern (Häuser gehen sichtbar an), Nachbarn zahlen, evtl. kleiner Imbiss | offen |
@@ -55,6 +55,7 @@
 ### Spielregeln, die der Besitzer festgelegt hat
 - 2 Dynamos im selben Netz = doppelte Energie beim Strampeln (`dynamoCount`).
 - Strom wird nur gespeichert, wenn Batterien in Reichweite eines Dynamos stehen (Grundspeicher 20, Batterie +60, Akku +150, `recalcCap`).
+- **Wände** (Taste 7, 2 Schrott) stehen quer zur Blickrichtung. **Windschutz** = Anteil von 12 Strahlen rund um Sami, die innerhalb 3,5 m eine Wand/ein Haus treffen (`computeShelter`); Wärmeverlust × (1 − Windschutz × 0,8). Anzeige oben bei der Temperatur.
 - Gebaute Objekte blockieren nur ihre echte Grundfläche (Kreis-Kollision `FOOTPRINT`), z. B. eine Lampe nur den dünnen Mast.
 
 ### Code-Aufbau (Abschnitte in index.html)
@@ -371,6 +372,7 @@ const BLUEPRINTS = [
   { id: 'charger', key: '4', name: 'Handy-Ladestation', cost: { metall: 2, kabel: 3 },        info: 'Passanten laden ihr Handy und zahlen dafür.', makes: '+💰' },
   { id: 'cell',    key: '5', name: 'Batterie',       cost: { schrott: 2, metall: 1, kabel: 1 }, info: 'Speichert Strom vom Dynamo. Muss in Kabel-Reichweite eines Dynamos stehen.', makes: '+60 ⚡ Speicher' },
   { id: 'battery', key: '6', name: 'Akku-Speicher',  cost: { autobatterie: 1, kabel: 2 },     info: 'Speichert viel mehr Strom.', makes: '+150 ⚡ Speicher' },
+  { id: 'wall',    key: '7', name: 'Wand',           cost: { schrott: 2 },                    info: 'Schützt vor Wind und Kälte. Steht quer in deiner Blickrichtung.', makes: '🧱 Windschutz' },
 ];
 const ITEM_NAMES = { schrott: '🔩 Schrott', kabel: '🧵 Kabel', metall: '⚙️ Metall', autobatterie: '🔋 Autobatterie', muenzen: '💰 Münzen', essen: '🥫 Dosen' };
 const NET_RANGE = 9; // so weit reichen die Kabel vom Netz
@@ -436,6 +438,11 @@ function buildMesh(b) {
     box(0.7, 1.3, 0.4, 0x2b4a6b, 0, 0.65, 0, g);
     o.screen = box(0.5, 0.35, 0.05, 0x111111, 0, 1.0, 0.22, g, { emissive: 0x4ad3ff, emissiveIntensity: 0 });
     const sign = makeLabel('📱 Laden: 2 💰', '#7cc8ff'); sign.position.y = 1.9; g.add(sign);
+  } else if (b.id === 'wall') {
+    // Wellblech-Wand aus Schrott: zwei Pfosten, drei Platten
+    box(0.12, 2.3, 0.12, 0x4a4038, -1, 1.15, 0, g); box(0.12, 2.3, 0.12, 0x4a4038, 1, 1.15, 0, g);
+    [0x7d8288, 0x6e6a5e, 0x8a6d55].forEach((c, k) => { const pl = box(0.72, 2.1, 0.06, c, -0.68 + k * 0.68, 1.1, 0.02 * (k % 2 ? 1 : -1), g); pl.rotation.z = (k - 1) * 0.03; });
+    box(2.1, 0.08, 0.1, 0x4a4038, 0, 1.6, 0.06, g);
   } else if (b.id === 'cell') {
     box(0.55, 0.42, 0.35, 0x1f2326, 0, 0.21, 0, g);
     cyl(0.04, 0.04, 0.08, 0xc0392b, -0.15, 0.46, 0, g, 8); cyl(0.04, 0.04, 0.08, 0x2c3e50, 0.15, 0.46, 0, g, 8);
@@ -469,7 +476,7 @@ function connected(o) { return sources().some(s => s !== o && Math.hypot(s.b.x -
 function updateCables() {
   cables.forEach(c => scene.remove(c)); cables = [];
   builtObjs.forEach(o => {
-    if (o.b.id === 'dynamo') return;
+    if (o.b.id === 'dynamo' || o.b.id === 'wall') return;
     const src = sources().filter(s => s !== o).sort((a, b) => Math.hypot(a.b.x - o.b.x, a.b.z - o.b.z) - Math.hypot(b.b.x - o.b.x, b.b.z - o.b.z))[0];
     if (!src || Math.hypot(src.b.x - o.b.x, src.b.z - o.b.z) > NET_RANGE) return;
     const pts = [];
@@ -628,14 +635,15 @@ function tryBuild(bp) {
   const x = p.x + Math.sin(a) * 1.6, z = p.z + Math.cos(a) * 1.6;
   if (blocked(x, z, 0.6)) { toast('Hier ist kein Platz'); return; }
   Object.entries(bp.cost).forEach(([k, v]) => S.inv[k] -= v);
-  const b = { id: bp.id, x, z, rot: a + Math.PI / 2, on: bp.id === 'lamp' };
+  // Wände stehen quer zur Blickrichtung, alles andere seitlich wie bisher
+  const b = { id: bp.id, x, z, rot: bp.id === 'wall' ? a : a + Math.PI / 2, on: bp.id === 'lamp' };
   S.built.push(b);
   buildMesh(b); updateCables();
   addBuiltCollider(b); recalcCap();
   toast(bp.name + ' gebaut');
   closeBuild(true);
   const o = builtObjs[builtObjs.length - 1];
-  if (bp.id !== 'dynamo' && bp.id !== 'battery' && !connected(o)) toast('⚠ Nicht angeschlossen: zu weit vom Dynamo');
+  if (!['dynamo', 'battery', 'wall'].includes(bp.id) && !connected(o)) toast('⚠ Nicht angeschlossen: zu weit vom Dynamo');
   if (bp.id === 'dynamo' && !S.story.dynamo) { S.story.dynamo = true; say([['Sami', 'Ein altes Fahrrad, ein Dynamo aus einem Roller... Wenn das klappt, hab ich heute Nacht Wärme.']]); }
 }
 
@@ -646,7 +654,7 @@ function nearest() {
   const cands = [];
   scrapMeshes.forEach(s => cands.push({ d: Math.hypot(s.x - p.x, s.z - p.z), kind: 'scrap', s }));
   binMeshes.forEach(s => { if (!S.binsTaken.includes(s.i)) cands.push({ d: Math.hypot(s.x - p.x, s.z - p.z), kind: 'bin', s }); });
-  builtObjs.forEach(o => cands.push({ d: Math.hypot(o.b.x - p.x, o.b.z - p.z), kind: o.b.id, o }));
+  builtObjs.forEach(o => o.b.id !== 'wall' && cands.push({ d: Math.hypot(o.b.x - p.x, o.b.z - p.z), kind: o.b.id, o }));
   if (!S.carSearched) cands.push({ d: Math.hypot(12 - p.x, 2.2 - p.z) - 1.6, kind: 'car' });
   cands.push({ d: Math.hypot(-22 - p.x, 0 - p.z) - 0.5, kind: 'kiosk' });
   cands.sort((a, b) => a.d - b.d);
@@ -707,7 +715,7 @@ function blocked(x, z, r) {
       || W.circles.some(c => Math.hypot(x - c.x, z - c.z) < c.r + r);
 }
 // Gebaute Objekte blockieren nur ihre echte Grundfläche (z. B. ein dünner Lampenmast)
-const FOOTPRINT = { lamp: [[0, 0.1]], heater: [[0, 0.42]], charger: [[0, 0.4]], cell: [[0, 0.3]],
+const FOOTPRINT = { wall: [[-0.9, 0.12], [-0.6, 0.12], [-0.3, 0.12], [0, 0.12], [0.3, 0.12], [0.6, 0.12], [0.9, 0.12]], lamp: [[0, 0.1]], heater: [[0, 0.42]], charger: [[0, 0.4]], cell: [[0, 0.3]],
   dynamo: [[-0.5, 0.28], [0, 0.28], [0.5, 0.28]], battery: [[-0.55, 0.3], [0, 0.3], [0.55, 0.3]] };
 function addBuiltCollider(b) {
   (FOOTPRINT[b.id] || [[0, 0.4]]).forEach(([off, r]) => {
@@ -771,6 +779,17 @@ function updateSami(dt) {
 }
 
 // ---------------------------------------------------------------- Überleben
+// Windschutz: 12 Strahlen rund um Sami, wie viele treffen in 3,5 m eine Wand oder ein Haus?
+let shelterNow = 0, shelterT = 0;
+function computeShelter() {
+  const p = sami.g.position, N = 12;
+  let hit = 0;
+  for (let i = 0; i < N; i++) {
+    const a = i / N * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a);
+    for (let d = 0.4; d <= 3.5; d += 0.1) { if (blocked(p.x + dx * d, p.z + dz * d, 0.05)) { hit++; break; } }
+  }
+  return hit / N;
+}
 function isNight() { return S.time >= 19 || S.time < 6.5; }
 function ambientTemp() {
   // -9°C nachts, +3°C mittags
@@ -779,6 +798,7 @@ function ambientTemp() {
   return Math.round(-3 + day * 6 - (isNight() ? 3 : 0));
 }
 function updateSurvival(dt) {
+  shelterT -= dt; if (shelterT <= 0) { shelterT = 0.25; shelterNow = computeShelter(); }
   // Zeit: ein Spieltag dauert 6 Minuten
   const prevNight = isNight();
   S.time += dt * (24 / 360);
@@ -802,7 +822,8 @@ function updateSurvival(dt) {
   const p = sami.g.position;
   const heat = builtObjs.some(o => o.b.id === 'heater' && o.powered && Math.hypot(o.b.x - p.x, o.b.z - p.z) < 3.5);
   if (heat) warmDelta = 2.2;
-  if (p.z < -4 && Math.abs(p.x) < 4.5) warmDelta *= 0.7;  // Gasse schützt vor Wind
+  // Windschutz durch Wände und Häuser: weniger Wärmeverlust
+  if (warmDelta < 0) warmDelta *= 1 - shelterNow * 0.8;
   if (S.food <= 0) warmDelta -= 0.5;
   S.warmth = clamp(S.warmth + warmDelta * dt, 0, 100);
   S.food = clamp(S.food - dt * 0.18, 0, 100);
@@ -869,7 +890,7 @@ function updateHUD() {
   const h = Math.floor(S.time), m = Math.floor((S.time - h) * 60);
   $('time').textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
   $('day').textContent = 'Tag ' + S.day + (isNight() ? ' · Nacht' : '');
-  $('temp').textContent = ambientTemp() + ' °C';
+  $('temp').textContent = ambientTemp() + ' °C' + (shelterNow > 0.05 ? '  ·  🧱 Windschutz ' + Math.round(shelterNow * 100) + ' %' : '');
   $('inv').innerHTML = Object.entries(S.inv).map(([k, v]) => `<span>${ITEM_NAMES[k]} <b>${v}</b></span>`).join('') + (S.inv.essen ? '<span style="grid-column:span 2;color:#a59f90;font-size:11px"><kbd>F</kbd>essen</span>' : '');
   const q = QUESTS[Math.min(S.quest, QUESTS.length - 1)];
   $('questtext').textContent = q.t();
@@ -952,7 +973,7 @@ const baseColliders = W.colliders.length;
 S = freshState();
 camera.position.set(6, 6, -2);
 requestAnimationFrame(frame);
-window.__s = { blocked, get S() { return S; }, get yaw() { return camYaw; }, sami, startGame, keys, interact, nearest, tryBuild: id => tryBuild(BLUEPRINTS.find(b => b.id === id)), setE: v => { eHeld = v; }, get running() { return running; } };
+window.__s = { blocked, get shelter() { return shelterNow; }, get S() { return S; }, get yaw() { return camYaw; }, sami, startGame, keys, interact, nearest, tryBuild: id => tryBuild(BLUEPRINTS.find(b => b.id === id)), setE: v => { eHeld = v; }, get running() { return running; } };
 </script>
 </body>
 </html>
