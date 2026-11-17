@@ -29,7 +29,7 @@
 
 | Stufe | Inhalt | Status |
 | --- | --- | --- |
-| 1. Straße | Schrott sammeln, Fahrrad-Dynamo, Heizlüfter, Lampe, Handy-Ladestation, Akku aus Autowrack, 3 Nächte überleben | **fertig (Prototyp)** |
+| 1. Straße | Schrott sammeln, Fahrrad-Dynamo (mehrere Dynamos im Netz = mehrfache Leistung), Heizlüfter, Lampe, Handy-Ladestation, Batterie (+60 Speicher), Akku-Speicher aus Autowrack (+150), 3 Nächte überleben | **fertig (Prototyp)** |
 | 2. Hinterhof | Autobatterien, Solarpanel auf Einkaufswagen, erste Nachbarn versorgen | offen |
 | 3. Dach | Windrad aus Schrott, mehr Strom | offen |
 | 4. Viertel | Kabel zu Häusern (Häuser gehen sichtbar an), Nachbarn zahlen, evtl. kleiner Imbiss | offen |
@@ -51,6 +51,11 @@
 - **B** = Bau-Menü – **gibt die Maus frei**, damit man mit der Maus auswählt; nach dem Bauen wird die Maus wieder eingefangen. Tasten 1–5 gehen auch.
 - **E** = aufheben/benutzen, **E halten** am Dynamo = strampeln
 - **F** = Dose essen
+
+### Spielregeln, die der Besitzer festgelegt hat
+- 2 Dynamos im selben Netz = doppelte Energie beim Strampeln (`dynamoCount`).
+- Strom wird nur gespeichert, wenn Batterien in Reichweite eines Dynamos stehen (Grundspeicher 20, Batterie +60, Akku +150, `recalcCap`).
+- Gebaute Objekte blockieren nur ihre echte Grundfläche (Kreis-Kollision `FOOTPRINT`), z. B. eine Lampe nur den dünnen Mast.
 
 ### Code-Aufbau (Abschnitte in index.html)
 `Renderer` → `Figuren` (makePerson, walkAnim) → `Welt` (Straße, Häuser, Gasse, Kiosk, Werbetafel, Autowrack, Schnee) → `Sami` → `Spielzustand` (BLUEPRINTS, freshState) → `Interaktionsobjekte` (Schrott, Mülltonnen, gebaute Objekte, Kabelnetz mit Reichweite NET_RANGE=9) → `Passanten` (zahlen fürs Handyladen) → `Ziele/Geschichte` (QUESTS) → `Dialog` → `Eingabe` → `Bauen` → `Interaktion` → `Bewegung` → `Überleben` (Zeit, Strom, Wärme, Hunger, Tod, Morgen/Nacht) → `Licht/Himmel` → `HUD` → `Kamera` → `Schleife` → Start/Retry. Test-Hook: `window.__s`.
@@ -278,7 +283,7 @@ function makeLabel(text, color = '#ffb84d') {
 }
 
 // ---------------------------------------------------------------- Welt
-const W = { colliders: [], interact: [] };
+const W = { colliders: [], circles: [], interact: [] };
 function collider(x, z, w, d) { W.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 }); }
 
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), mat(0x3a3a3e)); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
@@ -364,7 +369,8 @@ const BLUEPRINTS = [
   { id: 'heater',  key: '2', name: 'Heizlüfter',     cost: { schrott: 3, metall: 2, kabel: 1 }, info: 'Wärmt dich in der Nähe. Braucht Strom.', makes: '-1,2 ⚡/s' },
   { id: 'lamp',    key: '3', name: 'Lampe',          cost: { schrott: 1, kabel: 1 },          info: 'Licht. Hält Ratten fern, wirkt einladend.', makes: '-0,2 ⚡/s' },
   { id: 'charger', key: '4', name: 'Handy-Ladestation', cost: { metall: 2, kabel: 3 },        info: 'Passanten laden ihr Handy und zahlen dafür.', makes: '+💰' },
-  { id: 'battery', key: '5', name: 'Akku-Speicher',  cost: { autobatterie: 1, kabel: 2 },     info: 'Speichert viel mehr Strom.', makes: '+150 ⚡ Speicher' },
+  { id: 'cell',    key: '5', name: 'Batterie',       cost: { schrott: 2, metall: 1, kabel: 1 }, info: 'Speichert Strom vom Dynamo. Muss in Kabel-Reichweite eines Dynamos stehen.', makes: '+60 ⚡ Speicher' },
+  { id: 'battery', key: '6', name: 'Akku-Speicher',  cost: { autobatterie: 1, kabel: 2 },     info: 'Speichert viel mehr Strom.', makes: '+150 ⚡ Speicher' },
 ];
 const ITEM_NAMES = { schrott: '🔩 Schrott', kabel: '🧵 Kabel', metall: '⚙️ Metall', autobatterie: '🔋 Autobatterie', muenzen: '💰 Münzen', essen: '🥫 Dosen' };
 const NET_RANGE = 9; // so weit reichen die Kabel vom Netz
@@ -373,7 +379,7 @@ let S;  // Spielstand
 function freshState() {
   return {
     day: 1, time: 9.5, // Uhrzeit in Stunden
-    warmth: 100, food: 80, volt: 0, cap: 40,
+    warmth: 100, food: 80, volt: 0, cap: 20,
     inv: { schrott: 0, kabel: 0, metall: 0, autobatterie: 0, muenzen: 0, essen: 0 },
     built: [], // {id, x, z, on}
     scrapTaken: [], binsTaken: [], carSearched: false,
@@ -430,6 +436,11 @@ function buildMesh(b) {
     box(0.7, 1.3, 0.4, 0x2b4a6b, 0, 0.65, 0, g);
     o.screen = box(0.5, 0.35, 0.05, 0x111111, 0, 1.0, 0.22, g, { emissive: 0x4ad3ff, emissiveIntensity: 0 });
     const sign = makeLabel('📱 Laden: 2 💰', '#7cc8ff'); sign.position.y = 1.9; g.add(sign);
+  } else if (b.id === 'cell') {
+    box(0.55, 0.42, 0.35, 0x1f2326, 0, 0.21, 0, g);
+    cyl(0.04, 0.04, 0.08, 0xc0392b, -0.15, 0.46, 0, g, 8); cyl(0.04, 0.04, 0.08, 0x2c3e50, 0.15, 0.46, 0, g, 8);
+    o.ind = box(0.45, 0.06, 0.03, 0x39ff8f, 0, 0.3, 0.19, g, { emissive: 0x39ff8f, emissiveIntensity: 0.6 });
+    o.lbl = makeLabel('Batterie'); o.lbl.position.y = 1.1; g.add(o.lbl);
   } else if (b.id === 'battery') {
     for (let k = 0; k < 3; k++) box(0.5, 0.4, 0.35, 0x222222, -0.55 + k * 0.55, 0.2, 0, g);
     o.ind = box(1.6, 0.05, 0.05, 0x39ff8f, 0, 0.45, 0.18, g, { emissive: 0x39ff8f, emissiveIntensity: 0.5 });
@@ -444,7 +455,16 @@ function rebuildAll() {
   updateCables();
 }
 // Netz: alles in Reichweite eines Dynamos oder Akkus ist angeschlossen
-function sources() { return builtObjs.filter(o => o.b.id === 'dynamo' || o.b.id === 'battery'); }
+function sources() { return builtObjs.filter(o => o.b.id === 'dynamo' || o.b.id === 'battery' || o.b.id === 'cell'); }
+const STORE = { cell: 60, battery: 150 };
+// Speicher zählt nur, wenn die Batterie in Reichweite eines Dynamos steht
+function nearDynamo(o) { return builtObjs.some(d => d.b.id === 'dynamo' && Math.hypot(d.b.x - o.b.x, d.b.z - o.b.z) <= NET_RANGE); }
+function recalcCap() {
+  S.cap = 20 + builtObjs.reduce((sum, o) => sum + (STORE[o.b.id] && nearDynamo(o) ? STORE[o.b.id] : 0), 0);
+  S.volt = Math.min(S.volt, S.cap);
+}
+// Mehrere Dynamos im selben Netz: jeder zusätzliche Dynamo bringt seine volle Leistung dazu
+function dynamoCount(o) { return builtObjs.filter(d => d.b.id === 'dynamo' && Math.hypot(d.b.x - o.b.x, d.b.z - o.b.z) <= NET_RANGE).length; }
 function connected(o) { return sources().some(s => s !== o && Math.hypot(s.b.x - o.b.x, s.b.z - o.b.z) <= NET_RANGE); }
 function updateCables() {
   cables.forEach(c => scene.remove(c)); cables = [];
@@ -611,8 +631,7 @@ function tryBuild(bp) {
   const b = { id: bp.id, x, z, rot: a + Math.PI / 2, on: bp.id === 'lamp' };
   S.built.push(b);
   buildMesh(b); updateCables();
-  if (bp.id === 'battery') S.cap += 150;
-  collider(x, z, 0.9, 0.9);
+  addBuiltCollider(b); recalcCap();
   toast(bp.name + ' gebaut');
   closeBuild(true);
   const o = builtObjs[builtObjs.length - 1];
@@ -644,7 +663,8 @@ function promptFor(n) {
     case 'heater': return `<kbd>E</kbd>Heizlüfter ${n.o.b.on ? 'aus' : 'ein'}schalten` + (connected(n.o) ? '' : ' (nicht angeschlossen)');
     case 'lamp': return `<kbd>E</kbd>Lampe ${n.o.b.on ? 'aus' : 'ein'}schalten`;
     case 'charger': return connected(n.o) ? 'Ladestation: Passanten kommen von selbst' : 'Ladestation: nicht angeschlossen';
-    case 'battery': return `Akku: ${Math.floor(S.volt)}/${S.cap} ⚡`;
+    case 'battery': case 'cell': return nearDynamo(n.o) ? `Speicher: ${Math.floor(S.volt)}/${S.cap} ⚡` : 'Batterie: nicht mit einem Dynamo verbunden';
+    case 'dynamo_x': return '';
   }
   return '';
 }
@@ -682,7 +702,19 @@ function eatIfNeeded() {
 }
 
 // ---------------------------------------------------------------- Bewegung
-function blocked(x, z, r) { return W.colliders.some(c => x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r); }
+function blocked(x, z, r) {
+  return W.colliders.some(c => x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r)
+      || W.circles.some(c => Math.hypot(x - c.x, z - c.z) < c.r + r);
+}
+// Gebaute Objekte blockieren nur ihre echte Grundfläche (z. B. ein dünner Lampenmast)
+const FOOTPRINT = { lamp: [[0, 0.1]], heater: [[0, 0.42]], charger: [[0, 0.4]], cell: [[0, 0.3]],
+  dynamo: [[-0.5, 0.28], [0, 0.28], [0.5, 0.28]], battery: [[-0.55, 0.3], [0, 0.3], [0.55, 0.3]] };
+function addBuiltCollider(b) {
+  (FOOTPRINT[b.id] || [[0, 0.4]]).forEach(([off, r]) => {
+    const rot = b.rot || 0; // lokale x-Achse der Gruppe
+    W.circles.push({ x: b.x + Math.cos(rot) * off, z: b.z - Math.sin(rot) * off, r });
+  });
+}
 function updateSami(dt) {
   const n = nearest();
   // Strampeln
@@ -700,7 +732,9 @@ function updateSami(dt) {
     sami.hipL.rotation.x = -1.2 + Math.sin(sami.phase) * 0.5; sami.hipR.rotation.x = -1.2 - Math.sin(sami.phase) * 0.5;
     sami.shL.rotation.x = sami.shR.rotation.x = -1.1;
     o.wheel.rotation.x += dt * 14;
-    S.volt = Math.min(S.cap, S.volt + dt * 7);
+    const mult = dynamoCount(o);
+    S.volt = Math.min(S.cap, S.volt + dt * 7 * mult);
+    o.mult = mult;
     S.food = Math.max(0, S.food - dt * 0.6);
     S.warmth = Math.min(100, S.warmth + dt * 0.35); // Bewegung hält warm
     return;
@@ -758,7 +792,7 @@ function updateSurvival(dt) {
     const powered = (o.b.id === 'heater' || o.b.id === 'lamp') && o.b.on && connected(o) && S.volt > 0;
     if (o.b.id === 'heater') { draw += powered ? 1.2 : 0; o.grill.material.emissiveIntensity = powered ? 0.9 + Math.sin(performance.now() / 120) * 0.1 : 0; o.light.intensity = powered ? 1.4 : 0; o.powered = powered; }
     if (o.b.id === 'lamp') { draw += powered ? 0.2 : 0; o.bulb.material.emissiveIntensity = powered ? 1 : 0; o.light.intensity = powered ? 1.2 : 0; }
-    if (o.b.id === 'battery') o.ind.scale.x = Math.max(0.02, S.volt / S.cap);
+    if (o.b.id === 'battery' || o.b.id === 'cell') o.ind.scale.x = Math.max(0.02, S.volt / S.cap);
   });
   S.volt = Math.max(0, S.volt - draw * dt);
 
@@ -841,7 +875,7 @@ function updateHUD() {
   $('questtext').textContent = q.t();
   if (q.done() && S.quest < QUESTS.length - 1) advanceQuest();
   const n = pedaling ? null : nearest();
-  const pr = pedaling ? '⚡ Strampeln... E loslassen zum Absteigen' : promptFor(n);
+  const pr = pedaling ? `⚡ Strampeln${pedaling.mult > 1 ? ' – ' + pedaling.mult + ' Dynamos = ' + pedaling.mult + '× Strom' : ''}... E loslassen zum Absteigen` + (S.volt >= S.cap - 0.5 ? ' (Speicher voll! Baue eine Batterie)' : '') : promptFor(n);
   $('prompt').innerHTML = pr; $('prompt').hidden = !pr;
   if (!$('build').hidden) refreshBuild();
 }
@@ -885,7 +919,7 @@ function frame(now) {
 function startGame(fresh) {
   S = fresh ? freshState() : (store.get('save', null) || freshState());
   spawnScrap(); spawnBins(); rebuildAll();
-  S.built.forEach(b => collider(b.x, b.z, 0.9, 0.9));
+  W.circles = []; S.built.forEach(addBuiltCollider); recalcCap();
   if (S.carSearched) {}
   checkpoint = JSON.stringify(S);
   ['stats', 'clock', 'inv', 'quest', 'hint'].forEach(id => $(id).hidden = false);
@@ -908,7 +942,7 @@ $('retrybtn').addEventListener('click', () => {
   S.warmth = Math.max(S.warmth, 60); S.food = Math.max(S.food, 50);
   // Welt passend zum Checkpoint neu aufbauen
   W.colliders = W.colliders.slice(0, baseColliders);
-  spawnScrap(); spawnBins(); rebuildAll(); S.built.forEach(b => collider(b.x, b.z, 0.9, 0.9));
+  spawnScrap(); spawnBins(); rebuildAll(); W.circles = []; S.built.forEach(addBuiltCollider); recalcCap();
   sami.g.position.set(-1.5, 0, -9);
   running = true;
 });
@@ -918,7 +952,7 @@ const baseColliders = W.colliders.length;
 S = freshState();
 camera.position.set(6, 6, -2);
 requestAnimationFrame(frame);
-window.__s = { get S() { return S; }, get yaw() { return camYaw; }, sami, startGame, keys, interact, nearest, tryBuild: id => tryBuild(BLUEPRINTS.find(b => b.id === id)), setE: v => { eHeld = v; }, get running() { return running; } };
+window.__s = { blocked, get S() { return S; }, get yaw() { return camYaw; }, sami, startGame, keys, interact, nearest, tryBuild: id => tryBuild(BLUEPRINTS.find(b => b.id === id)), setE: v => { eHeld = v; }, get running() { return running; } };
 </script>
 </body>
 </html>
