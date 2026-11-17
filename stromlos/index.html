@@ -82,7 +82,7 @@
 <div id="prompt" class="hud" hidden></div>
 <div id="toast" class="hud" hidden></div>
 <div id="vignette" class="hud"></div>
-<div id="hint" class="hud" hidden><kbd>WASD</kbd>laufen &nbsp; <kbd>2× W</kbd>sprinten &nbsp; <kbd>Leertaste</kbd>springen &nbsp; <kbd>Maus</kbd>Kamera &nbsp; <kbd>E</kbd>benutzen &nbsp; <kbd>B</kbd>bauen (Maus wird frei)</div>
+<div id="hint" class="hud" hidden><kbd>WASD</kbd>laufen &nbsp; <kbd>2× W</kbd>sprinten &nbsp; <kbd>Leertaste</kbd>springen &nbsp; <kbd>Maus</kbd>Kamera &nbsp; <kbd>E</kbd>benutzen &nbsp; <kbd>B</kbd>bauen (Maus wird frei) &nbsp; <kbd>V</kbd>Ansicht</div>
 <div id="build" hidden></div>
 <div id="lockhint" class="hud" hidden>Ins Bild klicken = Kamera mit der Maus steuern</div>
 
@@ -96,6 +96,7 @@
       <kbd>Maus</kbd><span>Kamera drehen (einmal ins Bild klicken), Mausrad = Zoom, Esc = Mauszeiger zurück</span>
       <kbd>E</kbd><span>aufheben, benutzen, gedrückt halten = strampeln</span>
       <kbd>B</kbd><span>Bau-Menü</span>
+      <kbd>V</kbd><span>Ich-Perspektive / Ansicht von hinten</span>
     </div>
     <button class="big" id="startbtn" type="button">Überleben</button>
   </div>
@@ -286,7 +287,8 @@ const BLUEPRINTS = [
   { id: 'charger', key: '4', name: 'Handy-Ladestation', cost: { metall: 2, kabel: 3 },        info: 'Passanten laden ihr Handy und zahlen dafür.', makes: '+💰' },
   { id: 'cell',    key: '5', name: 'Batterie',       cost: { schrott: 2, metall: 1, kabel: 1 }, info: 'Speichert Strom vom Dynamo. Muss in Kabel-Reichweite eines Dynamos stehen.', makes: '+60 ⚡ Speicher' },
   { id: 'battery', key: '6', name: 'Akku-Speicher',  cost: { autobatterie: 1, kabel: 2 },     info: 'Speichert viel mehr Strom.', makes: '+150 ⚡ Speicher' },
-  { id: 'wall',    key: '7', name: 'Wand',           cost: { schrott: 2 },                    info: 'Schützt vor Wind und Kälte. Steht quer in deiner Blickrichtung.', makes: '🧱 Windschutz' },
+  { id: 'wall',    key: '7', name: 'Große Wand',     cost: { schrott: 3 },                    info: '3 m breit, 3 m hoch. Schützt vor Wind und Kälte. Steht quer in deiner Blickrichtung.', makes: '🧱 Windschutz' },
+  { id: 'door',    key: '8', name: 'Wand mit Tür',   cost: { schrott: 3, metall: 1 },         info: 'Große Wand mit Tür. E = öffnen/schließen. Geschlossen schützt sie wie eine Wand.', makes: '🚪 Tür' },
 ];
 const ITEM_NAMES = { schrott: '🔩 Schrott', kabel: '🧵 Kabel', metall: '⚙️ Metall', autobatterie: '🔋 Autobatterie', muenzen: '💰 Münzen', essen: '🥫 Dosen' };
 const NET_RANGE = 9; // so weit reichen die Kabel vom Netz
@@ -353,10 +355,19 @@ function buildMesh(b) {
     o.screen = box(0.5, 0.35, 0.05, 0x111111, 0, 1.0, 0.22, g, { emissive: 0x4ad3ff, emissiveIntensity: 0 });
     const sign = makeLabel('📱 Laden: 2 💰', '#7cc8ff'); sign.position.y = 1.9; g.add(sign);
   } else if (b.id === 'wall') {
-    // Wellblech-Wand aus Schrott: zwei Pfosten, drei Platten
-    box(0.12, 2.3, 0.12, 0x4a4038, -1, 1.15, 0, g); box(0.12, 2.3, 0.12, 0x4a4038, 1, 1.15, 0, g);
-    [0x7d8288, 0x6e6a5e, 0x8a6d55].forEach((c, k) => { const pl = box(0.72, 2.1, 0.06, c, -0.68 + k * 0.68, 1.1, 0.02 * (k % 2 ? 1 : -1), g); pl.rotation.z = (k - 1) * 0.03; });
-    box(2.1, 0.08, 0.1, 0x4a4038, 0, 1.6, 0.06, g);
+    // Große Wellblech-Wand aus Schrott: 3 m breit, 3 m hoch
+    [-1.5, 0, 1.5].forEach(x => box(0.14, 3.1, 0.14, 0x4a4038, x, 1.55, 0, g));
+    [0x7d8288, 0x6e6a5e, 0x8a6d55, 0x737a70].forEach((c, k) => { const pl = box(0.78, 2.95, 0.06, c, -1.13 + k * 0.75, 1.5, 0.02 * (k % 2 ? 1 : -1), g); pl.rotation.z = (k % 2 ? 1 : -1) * 0.02; });
+    box(3.1, 0.1, 0.12, 0x4a4038, 0, 2.2, 0.07, g); box(3.1, 0.1, 0.12, 0x4a4038, 0, 0.8, 0.07, g);
+  } else if (b.id === 'door') {
+    // Wand mit Tür in der Mitte (1,1 m breit), Scharnier links
+    [-1.5, -0.55, 0.55, 1.5].forEach(x => box(0.14, 3.1, 0.14, 0x4a4038, x, 1.55, 0, g));
+    box(0.88, 2.95, 0.06, 0x7d8288, -1.02, 1.5, 0, g); box(0.88, 2.95, 0.06, 0x8a6d55, 1.02, 1.5, 0, g);
+    box(1.1, 0.75, 0.06, 0x6e6a5e, 0, 2.7, 0, g);                      // Sturz über der Tür
+    const hinge = new THREE.Group(); hinge.position.set(-0.5, 0, 0); g.add(hinge);
+    box(1.0, 2.25, 0.07, 0x5b4636, 0.5, 1.13, 0, hinge);               // Türblatt
+    box(0.06, 0.06, 0.12, 0xd0c090, 0.88, 1.1, 0.06, hinge);           // Griff
+    o.hinge = hinge; o.hinge.rotation.y = b.open ? -1.5 : 0;
   } else if (b.id === 'cell') {
     box(0.55, 0.42, 0.35, 0x1f2326, 0, 0.21, 0, g);
     cyl(0.04, 0.04, 0.08, 0xc0392b, -0.15, 0.46, 0, g, 8); cyl(0.04, 0.04, 0.08, 0x2c3e50, 0.15, 0.46, 0, g, 8);
@@ -390,7 +401,7 @@ function connected(o) { return sources().some(s => s !== o && Math.hypot(s.b.x -
 function updateCables() {
   cables.forEach(c => scene.remove(c)); cables = [];
   builtObjs.forEach(o => {
-    if (o.b.id === 'dynamo' || o.b.id === 'wall') return;
+    if (o.b.id === 'dynamo' || o.b.id === 'wall' || o.b.id === 'door') return;
     const src = sources().filter(s => s !== o).sort((a, b) => Math.hypot(a.b.x - o.b.x, a.b.z - o.b.z) - Math.hypot(b.b.x - o.b.x, b.b.z - o.b.z))[0];
     if (!src || Math.hypot(src.b.x - o.b.x, src.b.z - o.b.z) > NET_RANGE) return;
     const pts = [];
@@ -483,6 +494,7 @@ addEventListener('keydown', e => {
   keys[k] = true;
   if (k === 'e') { if (!eHeld) ePressed = true; eHeld = true; }
   if (k === 'b' && running) toggleBuild();
+  if (k === 'v' && running) { firstPerson = !firstPerson; toast(firstPerson ? 'Ich-Perspektive' : 'Ansicht von hinten'); }
   if (k === 'escape') closeBuild(false);
   if (!$('build').hidden) { const bp = BLUEPRINTS.find(b => b.key === k); if (bp) tryBuild(bp); }
   if ([' ', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault();
@@ -490,7 +502,7 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys[k] = false; if (k === 'e') eHeld = false; if (k === 'w' || k === 'arrowup') sprinting = false; });
 let lastWTap = 0, sprinting = false, jumpPressed = false, vy = 0;
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; eHeld = false; });
-let camYaw = 0.6, camPitch = 0.55, camDist = 9;
+let camYaw = 0.6, camPitch = 0.55, camDist = 9, firstPerson = true, fpPitch = -0.1;
 // Maus-Kamera: einmal klicken = Maus wird eingefangen, dann dreht die Kamera mit jeder Bewegung.
 const locked = () => document.pointerLockElement === renderer.domElement;
 renderer.domElement.addEventListener('click', () => {
@@ -503,8 +515,9 @@ addEventListener('pointermove', e => {
   // Ohne eingefangene Maus (z. B. wenn der Browser es blockiert) dreht die Kamera trotzdem mit.
   const dx = e.movementX || 0, dy = e.movementY || 0;
   if (Math.abs(dx) > 200 || Math.abs(dy) > 200) return; // Sprünge ignorieren
-  camYaw -= dx * (locked() ? 0.0035 : 0.005);
-  camPitch = clamp(camPitch + dy * 0.003, 0.15, 1.2);
+  camYaw -= dx * (locked() ? 0.0028 : 0.004);
+  if (firstPerson) fpPitch = clamp(fpPitch - dy * 0.0028, -1.35, 1.35);
+  else camPitch = clamp(camPitch + dy * 0.003, 0.15, 1.2);
 });
 document.addEventListener('pointerlockchange', () => { $('lockhint').hidden = locked() || !running || !$('build').hidden; });
 addEventListener('wheel', e => { camDist = clamp(camDist + e.deltaY * 0.01, 4, 18); }, { passive: true });
@@ -546,18 +559,19 @@ function toggleBuild() { if ($('build').hidden) openBuild(); else closeBuild(tru
 function tryBuild(bp) {
   if (!canAfford(bp)) { toast('Dir fehlen Teile'); return; }
   const p = sami.g.position, a = sami.g.rotation.y;
-  const x = p.x + Math.sin(a) * 1.6, z = p.z + Math.cos(a) * 1.6;
+  const dist = (bp.id === 'wall' || bp.id === 'door') ? 2.2 : 1.6;
+  const x = p.x + Math.sin(a) * dist, z = p.z + Math.cos(a) * dist;
   if (blocked(x, z, 0.6)) { toast('Hier ist kein Platz'); return; }
   Object.entries(bp.cost).forEach(([k, v]) => S.inv[k] -= v);
   // Wände stehen quer zur Blickrichtung, alles andere seitlich wie bisher
-  const b = { id: bp.id, x, z, rot: bp.id === 'wall' ? a : a + Math.PI / 2, on: bp.id === 'lamp' };
+  const b = { id: bp.id, x, z, rot: (bp.id === 'wall' || bp.id === 'door') ? a : a + Math.PI / 2, on: bp.id === 'lamp' };
   S.built.push(b);
   buildMesh(b); updateCables();
   addBuiltCollider(b); recalcCap();
   toast(bp.name + ' gebaut');
   closeBuild(true);
   const o = builtObjs[builtObjs.length - 1];
-  if (!['dynamo', 'battery', 'wall'].includes(bp.id) && !connected(o)) toast('⚠ Nicht angeschlossen: zu weit vom Dynamo');
+  if (!['dynamo', 'battery', 'wall', 'door'].includes(bp.id) && !connected(o)) toast('⚠ Nicht angeschlossen: zu weit vom Dynamo');
   if (bp.id === 'dynamo' && !S.story.dynamo) { S.story.dynamo = true; say([['Sami', 'Ein altes Fahrrad, ein Dynamo aus einem Roller... Wenn das klappt, hab ich heute Nacht Wärme.']]); }
 }
 
@@ -568,7 +582,7 @@ function nearest() {
   const cands = [];
   scrapMeshes.forEach(s => cands.push({ d: Math.hypot(s.x - p.x, s.z - p.z), kind: 'scrap', s }));
   binMeshes.forEach(s => { if (!S.binsTaken.includes(s.i)) cands.push({ d: Math.hypot(s.x - p.x, s.z - p.z), kind: 'bin', s }); });
-  builtObjs.forEach(o => o.b.id !== 'wall' && cands.push({ d: Math.hypot(o.b.x - p.x, o.b.z - p.z), kind: o.b.id, o }));
+  builtObjs.forEach(o => o.b.id !== 'wall' && cands.push({ d: Math.hypot(o.b.x - p.x, o.b.z - p.z) - (o.b.id === 'door' ? 1 : 0), kind: o.b.id, o }));
   if (!S.carSearched) cands.push({ d: Math.hypot(12 - p.x, 2.2 - p.z) - 1.6, kind: 'car' });
   cands.push({ d: Math.hypot(-22 - p.x, 0 - p.z) - 0.5, kind: 'kiosk' });
   cands.sort((a, b) => a.d - b.d);
@@ -584,6 +598,7 @@ function promptFor(n) {
     case 'dynamo': return '<kbd>E</kbd>gedrückt halten = strampeln';
     case 'heater': return `<kbd>E</kbd>Heizlüfter ${n.o.b.on ? 'aus' : 'ein'}schalten` + (connected(n.o) ? '' : ' (nicht angeschlossen)');
     case 'lamp': return `<kbd>E</kbd>Lampe ${n.o.b.on ? 'aus' : 'ein'}schalten`;
+    case 'door': return `<kbd>E</kbd>Tür ${n.o.b.open ? 'schließen' : 'öffnen'}`;
     case 'charger': return connected(n.o) ? 'Ladestation: Passanten kommen von selbst' : 'Ladestation: nicht angeschlossen';
     case 'battery': case 'cell': return nearDynamo(n.o) ? `Speicher: ${Math.floor(S.volt)}/${S.cap} ⚡` : 'Batterie: nicht mit einem Dynamo verbunden';
     case 'dynamo_x': return '';
@@ -615,6 +630,7 @@ function interact(n) {
     case 'kiosk':
       if (S.inv.muenzen >= 3) { S.inv.muenzen -= 3; S.food = clamp(S.food + 40, 0, 100); toast('+40 🍞  Warme Suppe'); if (!S.story.kiosk) { S.story.kiosk = true; say([['Kioskbesitzer', 'Strom von BlackGrid ist teuer, Kumpel. Die Suppe auch.'], ['Sami', 'Irgendwann hab ich meinen eigenen Strom. Dann reden wir nochmal.']]); } }
       else toast('Du hast nicht genug Münzen'); break;
+    case 'door': n.o.b.open = !n.o.b.open; break;
     case 'heater': case 'lamp':
       n.o.b.on = !n.o.b.on; break;
   }
@@ -626,15 +642,17 @@ function eatIfNeeded() {
 // ---------------------------------------------------------------- Bewegung
 function blocked(x, z, r) {
   return W.colliders.some(c => x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r)
-      || W.circles.some(c => Math.hypot(x - c.x, z - c.z) < c.r + r);
+      || W.circles.some(c => !(c.door && c.door.open) && Math.hypot(x - c.x, z - c.z) < c.r + r);
 }
 // Gebaute Objekte blockieren nur ihre echte Grundfläche (z. B. ein dünner Lampenmast)
-const FOOTPRINT = { wall: [[-0.9, 0.12], [-0.6, 0.12], [-0.3, 0.12], [0, 0.12], [0.3, 0.12], [0.6, 0.12], [0.9, 0.12]], lamp: [[0, 0.1]], heater: [[0, 0.42]], charger: [[0, 0.4]], cell: [[0, 0.3]],
+const WALLPTS = [-1.45, -1.2, -0.95, -0.7, -0.45, -0.2, 0.05, 0.3, 0.55, 0.8, 1.05, 1.3, 1.45].map(o => [o, 0.13]);
+const FOOTPRINT = { wall: WALLPTS, door: WALLPTS, lamp: [[0, 0.1]], heater: [[0, 0.42]], charger: [[0, 0.4]], cell: [[0, 0.3]],
   dynamo: [[-0.5, 0.28], [0, 0.28], [0.5, 0.28]], battery: [[-0.55, 0.3], [0, 0.3], [0.55, 0.3]] };
 function addBuiltCollider(b) {
   (FOOTPRINT[b.id] || [[0, 0.4]]).forEach(([off, r]) => {
     const rot = b.rot || 0; // lokale x-Achse der Gruppe
-    W.circles.push({ x: b.x + Math.cos(rot) * off, z: b.z - Math.sin(rot) * off, r });
+    // Bei Türen ist der mittlere Teil nur zu, wenn die Tür geschlossen ist
+    W.circles.push({ x: b.x + Math.cos(rot) * off, z: b.z - Math.sin(rot) * off, r, door: b.id === 'door' && Math.abs(off) < 0.5 ? b : null });
   });
 }
 function updateSami(dt) {
@@ -684,7 +702,7 @@ function updateSami(dt) {
     const nx = p.x + wx * speed * dt, nz = p.z + wz * speed * dt;
     if (!blocked(nx, p.z, 0.35)) p.x = clamp(nx, -48, 48);
     if (!blocked(p.x, nz, 0.35)) p.z = clamp(nz, -12.5, 12.5);
-    sami.g.rotation.y = lerpAngle(sami.g.rotation.y, Math.atan2(wx, wz), 1 - Math.exp(-dt * 14));
+    if (!firstPerson) sami.g.rotation.y = lerpAngle(sami.g.rotation.y, Math.atan2(wx, wz), 1 - Math.exp(-dt * 14));
     if (fast) S.food = Math.max(0, S.food - dt * 0.15);
   }
   if (sami.g.position.y > 0) { sami.hipL.rotation.x = -0.5; sami.hipR.rotation.x = 0.3; sami.shL.rotation.x = sami.shR.rotation.x = -2.6; }
@@ -726,6 +744,7 @@ function updateSurvival(dt) {
     const powered = (o.b.id === 'heater' || o.b.id === 'lamp') && o.b.on && connected(o) && S.volt > 0;
     if (o.b.id === 'heater') { draw += powered ? 1.2 : 0; o.grill.material.emissiveIntensity = powered ? 0.9 + Math.sin(performance.now() / 120) * 0.1 : 0; o.light.intensity = powered ? 1.4 : 0; o.powered = powered; }
     if (o.b.id === 'lamp') { draw += powered ? 0.2 : 0; o.bulb.material.emissiveIntensity = powered ? 1 : 0; o.light.intensity = powered ? 1.2 : 0; }
+    if (o.b.id === 'door') o.hinge.rotation.y += ((o.b.open ? -1.5 : 0) - o.hinge.rotation.y) * Math.min(1, dt * 8);
     if (o.b.id === 'battery' || o.b.id === 'cell') o.ind.scale.x = Math.max(0.02, S.volt / S.cap);
   });
   S.volt = Math.max(0, S.volt - draw * dt);
@@ -818,6 +837,17 @@ function updateHUD() {
 // ---------------------------------------------------------------- Kamera
 function updateCamera(dt) {
   const p = sami.g.position;
+  sami.g.visible = !firstPerson;
+  const fov = firstPerson ? 72 : 55; if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  if (firstPerson) {
+    // Ich-Perspektive: Kamera in Samis Kopf, Sami schaut immer dorthin, wo du hinschaust
+    if (!pedaling) sami.g.rotation.y = camYaw + Math.PI;
+    const eye = new THREE.Vector3(p.x, p.y + 1.72, p.z);
+    camera.position.copy(eye);
+    const dir = new THREE.Vector3(-Math.sin(camYaw) * Math.cos(fpPitch), Math.sin(fpPitch), -Math.cos(camYaw) * Math.cos(fpPitch));
+    camera.lookAt(eye.add(dir));
+    return;
+  }
   const target = new THREE.Vector3(p.x, 1.4, p.z);
   const off = new THREE.Vector3(Math.sin(camYaw) * Math.cos(camPitch), Math.sin(camPitch), Math.cos(camYaw) * Math.cos(camPitch)).multiplyScalar(camDist);
   camera.position.lerp(target.clone().add(off), 1 - Math.exp(-dt * 8));
@@ -887,7 +917,7 @@ const baseColliders = W.colliders.length;
 S = freshState();
 camera.position.set(6, 6, -2);
 requestAnimationFrame(frame);
-window.__s = { blocked, get shelter() { return shelterNow; }, get S() { return S; }, get yaw() { return camYaw; }, sami, startGame, keys, interact, nearest, tryBuild: id => tryBuild(BLUEPRINTS.find(b => b.id === id)), setE: v => { eHeld = v; }, get running() { return running; } };
+window.__s = { blocked, computeShelter, get shelter() { return shelterNow; }, get S() { return S; }, get yaw() { return camYaw; }, sami, startGame, keys, interact, nearest, tryBuild: id => tryBuild(BLUEPRINTS.find(b => b.id === id)), setE: v => { eHeld = v; }, get running() { return running; } };
 </script>
 </body>
 </html>
