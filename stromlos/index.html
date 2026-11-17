@@ -82,7 +82,7 @@
 <div id="prompt" class="hud" hidden></div>
 <div id="toast" class="hud" hidden></div>
 <div id="vignette" class="hud"></div>
-<div id="hint" class="hud" hidden><kbd>WASD</kbd>laufen &nbsp; <kbd>Maus</kbd>Kamera &nbsp; <kbd>E</kbd>benutzen &nbsp; <kbd>B</kbd>bauen (Maus wird frei)</div>
+<div id="hint" class="hud" hidden><kbd>WASD</kbd>laufen &nbsp; <kbd>2× W</kbd>sprinten &nbsp; <kbd>Leertaste</kbd>springen &nbsp; <kbd>Maus</kbd>Kamera &nbsp; <kbd>E</kbd>benutzen &nbsp; <kbd>B</kbd>bauen (Maus wird frei)</div>
 <div id="build" hidden></div>
 <div id="lockhint" class="hud" hidden>Ins Bild klicken = Kamera mit der Maus steuern</div>
 
@@ -91,7 +91,8 @@
     <h1>STROMLOS</h1>
     <p>Seit dem großen Stromausfall ist die Stadt dunkel. Nur der Konzern <b>BlackGrid</b> hat noch Strom, für alle, die zahlen können.<br>Sami kann nicht zahlen. Sami hat nur Schrott.</p>
     <div class="keys">
-      <kbd>WASD</kbd><span>laufen</span>
+      <kbd>WASD</kbd><span>laufen, <b>W zweimal tippen</b> = sprinten</span>
+      <kbd>Leertaste</kbd><span>springen</span>
       <kbd>Maus</kbd><span>Kamera drehen (einmal ins Bild klicken), Mausrad = Zoom, Esc = Mauszeiger zurück</span>
       <kbd>E</kbd><span>aufheben, benutzen, gedrückt halten = strampeln</span>
       <kbd>B</kbd><span>Bau-Menü</span>
@@ -451,6 +452,13 @@ let eHeld = false, ePressed = false;
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (dlg && (k === ' ' || k === 'enter' || k === 'e')) { nextLine(); e.preventDefault(); return; }
+  // Doppelt W tippen = sprinten (solange W gehalten wird)
+  if ((k === 'w' || k === 'arrowup') && !keys[k]) {
+    const now = performance.now();
+    if (now - lastWTap < 300) sprinting = true;
+    lastWTap = now;
+  }
+  if (k === ' ' && !keys[' ']) jumpPressed = true;
   keys[k] = true;
   if (k === 'e') { if (!eHeld) ePressed = true; eHeld = true; }
   if (k === 'b' && running) toggleBuild();
@@ -458,7 +466,8 @@ addEventListener('keydown', e => {
   if (!$('build').hidden) { const bp = BLUEPRINTS.find(b => b.key === k); if (bp) tryBuild(bp); }
   if ([' ', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault();
 });
-addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys[k] = false; if (k === 'e') eHeld = false; });
+addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys[k] = false; if (k === 'e') eHeld = false; if (k === 'w' || k === 'arrowup') sprinting = false; });
+let lastWTap = 0, sprinting = false, jumpPressed = false, vy = 0;
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; eHeld = false; });
 let camYaw = 0.6, camPitch = 0.55, camDist = 9;
 // Maus-Kamera: einmal klicken = Maus wird eingefangen, dann dreht die Kamera mit jeder Bewegung.
@@ -616,7 +625,13 @@ function updateSami(dt) {
     S.warmth = Math.min(100, S.warmth + dt * 0.35); // Bewegung hält warm
     return;
   }
-  if (sami.g.position.y > 0) sami.g.position.y = 0;
+  // Springen und Schwerkraft
+  const onGround = sami.g.position.y <= 0.001;
+  if (jumpPressed && onGround) { vy = 6.2; S.food = Math.max(0, S.food - 0.3); }
+  jumpPressed = false;
+  vy -= 18 * dt;
+  sami.g.position.y = Math.max(0, sami.g.position.y + vy * dt);
+  if (sami.g.position.y === 0) vy = 0;
   let ix = 0, iz = 0;
   if (keys.w || keys.arrowup) iz -= 1; if (keys.s || keys.arrowdown) iz += 1;
   if (keys.a || keys.arrowleft) ix -= 1; if (keys.d || keys.arrowright) ix += 1;
@@ -627,15 +642,17 @@ function updateSami(dt) {
     // relativ zur Kamera
     const cs = Math.cos(camYaw), sn = Math.sin(camYaw);
     const wx = ix * cs + iz * sn, wz = -ix * sn + iz * cs;
-    const speed = keys.shift ? 6.5 : 4.2;
+    const fast = sprinting || keys.shift;
+    const speed = fast ? 7 : 4.2;
     const p = sami.g.position;
     const nx = p.x + wx * speed * dt, nz = p.z + wz * speed * dt;
     if (!blocked(nx, p.z, 0.35)) p.x = clamp(nx, -48, 48);
     if (!blocked(p.x, nz, 0.35)) p.z = clamp(nz, -12.5, 12.5);
     sami.g.rotation.y = lerpAngle(sami.g.rotation.y, Math.atan2(wx, wz), 1 - Math.exp(-dt * 14));
-    if (keys.shift) S.food = Math.max(0, S.food - dt * 0.15);
+    if (fast) S.food = Math.max(0, S.food - dt * 0.15);
   }
-  walkAnim(sami, moving, dt, keys.shift ? 14 : 10);
+  if (sami.g.position.y > 0) { sami.hipL.rotation.x = -0.5; sami.hipR.rotation.x = 0.3; sami.shL.rotation.x = sami.shR.rotation.x = -2.6; }
+  else walkAnim(sami, moving, dt, (sprinting || keys.shift) ? 15 : 10);
   if (ePressed) interact(n);
 }
 
